@@ -1,8 +1,8 @@
 # ComputeVisionRemote
 
-Este repositorio contiene un ejemplo de sistema de ComputeVision remota dividido en dos partes:
+Este repositorio contiene un ejemplo de sistema de reconocimiento de señas ASL estáticas dividido en dos partes:
 
-- **backend**: servidor Python que recibe imágenes por WebSocket, detecta manos mediante [MediaPipe](https://google.github.io/mediapipe/) y devuelve las coordenadas, topología de los keypoints y la letra de ASL reconocida.
+- **backend**: servidor Python que recibe imágenes por WebSocket, detecta manos mediante [MediaPipe](https://google.github.io/mediapipe/), clasifica la seña y devuelve las coordenadas, topología y la letra de ASL reconocida (A–Z).
 - **frontend**: Aplicación Android que captura la cámara del teléfono, envía cada fotograma al backend y dibuja los puntos recibidos desde el backend en la pantalla.
 
 ## Estructura
@@ -20,6 +20,7 @@ Este repositorio contiene un ejemplo de sistema de ComputeVision remota dividido
 | `app.py`           | Punto de entrada del servidor. Expone un WebSocket en `/ws` que recibe fotogramas JPEG, ejecuta la detección de manos con MediaPipe y envía las coordenadas, topología y la letra de ASL detectada en formato JSON. |
 | `hand_tracker.py`  | Utilidad para dibujar los keypoints sobre un fotograma usando las herramientas de dibujo de MediaPipe. Es opcional y sirve como código de apoyo para pruebas locales.|
 | `client_test.py`   | Cliente de ejemplo que se conecta al WebSocket, envía la imagen capturada desde la cámara del PC y muestra en consola la respuesta recibida.|
+| `train_model.py`   | Script para entrenar un modelo de clasificación de ASL usando el dataset de imágenes de [Kaggle](https://www.kaggle.com/datasets/grassknoted/asl-alphabet/data). |
 | `requirements.txt` | Lista de dependencias de Python necesarias para ejecutar el servidor. |
 
 ## Requisitos
@@ -39,7 +40,13 @@ Este repositorio contiene un ejemplo de sistema de ComputeVision remota dividido
    ```bash
    pip install -r requirements.txt
    ```
-3. Iniciar el servidor:
+3. (Opcional) Entrenar un modelo si no se dispone de `asl_model.pkl`. Descargue el
+   dataset desde [Kaggle](https://www.kaggle.com/datasets/grassknoted/asl-alphabet/data)
+   y descomprímalo. Luego ejecute:
+   ```bash
+   python train_model.py /ruta/al/asl_alphabet_train asl_model.pkl
+   ```
+4. Iniciar el servidor:
    ```bash
    python app.py
    ```

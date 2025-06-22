@@ -4,6 +4,7 @@ import json
 from flask import Flask
 from flask_sock import Sock
 import mediapipe as mp
+import pickle
 
 app = Flask(__name__)
 sock = Sock(app)
@@ -23,46 +24,33 @@ DEFAULT_TOPOLOGY = [
     for c in mp_hands.HAND_CONNECTIONS
 ]
 
-
-def _finger_extended(landmarks, tip, pip):
-    """Return True if the finger is extended based on y-coordinates."""
-    return landmarks[tip].y < landmarks[pip].y
-
-
-def classify_gesture(hand_landmarks):
-    lm = hand_landmarks.landmark
-    index = _finger_extended(lm, 8, 6)
-    middle = _finger_extended(lm, 12, 10)
-    ring = _finger_extended(lm, 16, 14)
-    pinky = _finger_extended(lm, 20, 18)
-
-    wrist = lm[0]
-    thumb_tip = lm[4]
-    thumb_ip = lm[3]
-    thumb = abs(thumb_tip.x - wrist.x) > abs(thumb_ip.x - wrist.x)
-
-    if all([index, middle, ring, pinky, thumb]):
-        return "paper"
-    if index and middle and not ring and not pinky:
-        return "scissors"
-    if not any([index, middle, ring, pinky, thumb]):
-        return "rock"
-    if not any([index, middle, ring, pinky]):
-        return "closed"
-    return "unknown"
+# Load ASL classification model
+try:
+    with open("asl_model.pkl", "rb") as f:
+        asl_model = pickle.load(f)
+except FileNotFoundError:
+    asl_model = None
+    print("Warning: ASL model 'asl_model.pkl' not found. Classification disabled.")
 
 
-GESTURE_TO_LETTER = {
-    "rock": "A",      # fist
-    "paper": "B",     # open hand
-    "scissors": "V",  # index and middle finger
-    "closed": "E",    # closed with thumb over
-}
+
+def _extract_features(hand_landmarks):
+    """Return a flat array of landmark coordinates."""
+    feats = []
+    for lm in hand_landmarks.landmark:
+        feats.extend([lm.x, lm.y, lm.z])
+    return np.array(feats).reshape(1, -1)
 
 
-def gesture_to_letter(gesture: str) -> str:
-    """Map a simple gesture name to an ASL letter."""
-    return GESTURE_TO_LETTER.get(gesture, "")
+def predict_letter(hand_landmarks) -> str:
+    """Predict the ASL letter for the given hand landmarks."""
+    if asl_model is None:
+        return ""
+    features = _extract_features(hand_landmarks)
+    try:
+        return asl_model.predict(features)[0]
+    except Exception:
+        return ""
 
 @sock.route('/ws')
 def process_video(ws):
@@ -101,10 +89,10 @@ def process_video(ws):
                     for start, end in DEFAULT_TOPOLOGY:
                         topology.append([start + base, end + base])
 
-                    gesture = classify_gesture(hand_landmarks)
-                    letter = gesture_to_letter(gesture)
+                    letter = predict_letter(hand_landmarks)
                     detected_letters.append(letter)
-                    print(f"Detected gesture: {gesture}, letter: {letter}")
+                    if letter:
+                        print(f"Detected letter: {letter}")
 
             response = {
                 "keypoints": keypoints if keypoints else [],
