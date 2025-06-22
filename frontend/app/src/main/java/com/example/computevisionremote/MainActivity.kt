@@ -30,6 +30,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var previewView: PreviewView
     private lateinit var overlay: SurfaceView
     private lateinit var delayTextView: TextView
+    private lateinit var letterTextView: TextView
     private lateinit var switchCameraButton: Button
     private var socket: WebSocketClient? = null
     private var isSocketConnected: Boolean = false
@@ -48,6 +49,7 @@ class MainActivity : AppCompatActivity() {
         previewView = findViewById(R.id.previewView)
         overlay = findViewById(R.id.overlay)
         delayTextView = findViewById(R.id.delayTextView)
+        letterTextView = findViewById(R.id.letterTextView)
         switchCameraButton = findViewById(R.id.switchCameraButton)
         // Make sure overlay is transparent and on top
         overlay.setZOrderOnTop(true)
@@ -193,7 +195,11 @@ class MainActivity : AppCompatActivity() {
                 val delay = sendTime?.let { System.currentTimeMillis() - it } ?: 0L
                 runOnUiThread {
                     delayTextView.text = "${delay} ms"
-                    if (message != null) drawOverlay(JSONObject(message))
+                    if (message != null) {
+                        val json = JSONObject(message)
+                        letterTextView.text = json.optString("letter", "")
+                        drawOverlay(json)
+                    }
                 }
             }
 
