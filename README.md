@@ -2,7 +2,7 @@
 
 Este repositorio contiene un ejemplo de sistema de ComputeVision remota dividido en dos partes:
 
-- **backend**: servidor Python que recibe imágenes por WebSocket, detecta manos mediante [MediaPipe](https://google.github.io/mediapipe/) y devuelve las coordenadas, topologia de los keypoints, clasificación, etc.
+- **backend**: servidor Python que recibe imágenes por WebSocket, detecta manos mediante [MediaPipe](https://google.github.io/mediapipe/) y devuelve las coordenadas, topología de los keypoints y la letra de ASL reconocida.
 - **frontend**: Aplicación Android que captura la cámara del teléfono, envía cada fotograma al backend y dibuja los puntos recibidos desde el backend en la pantalla.
 
 ## Estructura
@@ -17,7 +17,7 @@ Este repositorio contiene un ejemplo de sistema de ComputeVision remota dividido
 
 |       Archivo      | Descripción |
 | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `app.py`           | Punto de entrada del servidor. Expone un WebSocket en `/ws` que recibe fotogramas JPEG, ejecuta la detección de manos con MediaPipe y envía las coordenadas y topología resultantes en formato JSON. también realiza una clasificación del gesto detectado. |
+| `app.py`           | Punto de entrada del servidor. Expone un WebSocket en `/ws` que recibe fotogramas JPEG, ejecuta la detección de manos con MediaPipe y envía las coordenadas, topología y la letra de ASL detectada en formato JSON. |
 | `hand_tracker.py`  | Utilidad para dibujar los keypoints sobre un fotograma usando las herramientas de dibujo de MediaPipe. Es opcional y sirve como código de apoyo para pruebas locales.|
 | `client_test.py`   | Cliente de ejemplo que se conecta al WebSocket, envía la imagen capturada desde la cámara del PC y muestra en consola la respuesta recibida.|
 | `requirements.txt` | Lista de dependencias de Python necesarias para ejecutar el servidor. |

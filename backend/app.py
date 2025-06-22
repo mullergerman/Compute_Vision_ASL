@@ -51,6 +51,19 @@ def classify_gesture(hand_landmarks):
         return "closed"
     return "unknown"
 
+
+GESTURE_TO_LETTER = {
+    "rock": "A",      # fist
+    "paper": "B",     # open hand
+    "scissors": "V",  # index and middle finger
+    "closed": "E",    # closed with thumb over
+}
+
+
+def gesture_to_letter(gesture: str) -> str:
+    """Map a simple gesture name to an ASL letter."""
+    return GESTURE_TO_LETTER.get(gesture, "")
+
 @sock.route('/ws')
 def process_video(ws):
     while True:
@@ -73,6 +86,7 @@ def process_video(ws):
 
             keypoints = []
             topology = []
+            detected_letters = []
             
             if results.multi_hand_landmarks:
                 for idx, hand_landmarks in enumerate(results.multi_hand_landmarks):
@@ -88,13 +102,16 @@ def process_video(ws):
                         topology.append([start + base, end + base])
 
                     gesture = classify_gesture(hand_landmarks)
-                    print(f"Detected gesture: {gesture}")
+                    letter = gesture_to_letter(gesture)
+                    detected_letters.append(letter)
+                    print(f"Detected gesture: {gesture}, letter: {letter}")
 
             response = {
                 "keypoints": keypoints if keypoints else [],
                 "topology": topology if topology else [],
                 "image_width": frame.shape[1],  # ancho de la imagen
-                "image_height": frame.shape[0]  # alto de la imagen
+                "image_height": frame.shape[0],  # alto de la imagen
+                "letter": detected_letters[0] if detected_letters else ""
             }
             ws.send(json.dumps(response))
 
