@@ -42,7 +42,8 @@ Este repositorio contiene un ejemplo de sistema de reconocimiento de señas ASL 
    ```
 3. (Opcional) Entrenar un modelo si no se dispone de `asl_model.pkl`. Descargue el
    dataset desde [Kaggle](https://www.kaggle.com/datasets/grassknoted/asl-alphabet/data)
-   y descomprímalo. Luego ejecute:
+   y descomprímalo. El directorio debe contener carpetas `A`, `B`, ..., `Z` con las
+   imágenes de cada seña. Luego ejecute:
    ```bash
    python train_model.py /ruta/al/asl_alphabet_train asl_model.pkl
    ```
