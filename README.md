@@ -20,7 +20,7 @@ Este repositorio contiene un ejemplo de sistema de reconocimiento de señas ASL 
 | `app.py`           | Punto de entrada del servidor. Expone un WebSocket en `/ws` que recibe fotogramas JPEG, ejecuta la detección de manos con MediaPipe y envía las coordenadas, topología y la letra de ASL detectada en formato JSON. |
 | `hand_tracker.py`  | Utilidad para dibujar los keypoints sobre un fotograma usando las herramientas de dibujo de MediaPipe. Es opcional y sirve como código de apoyo para pruebas locales.|
 | `client_test.py`   | Cliente de ejemplo que se conecta al WebSocket, envía la imagen capturada desde la cámara del PC y muestra en consola la respuesta recibida.|
-| `train_model.py`   | Script para entrenar un modelo de clasificación de ASL usando el dataset de imágenes de [Kaggle](https://www.kaggle.com/datasets/grassknoted/asl-alphabet/data). |
+| `train_model.py`   | Script para entrenar un modelo de clasificación de ASL a partir del dataset de imágenes de [Kaggle](https://www.kaggle.com/datasets/grassknoted/asl-alphabet/data). Extrae los puntos de la mano con MediaPipe para que el modelo sea compatible con `app.py`. |
 | `requirements.txt` | Lista de dependencias de Python necesarias para ejecutar el servidor. |
 
 ## Requisitos
@@ -42,7 +42,8 @@ Este repositorio contiene un ejemplo de sistema de reconocimiento de señas ASL 
    ```
 3. (Opcional) Entrenar un modelo si no se dispone de `asl_model.pkl`. Descargue el
    dataset desde [Kaggle](https://www.kaggle.com/datasets/grassknoted/asl-alphabet/data)
-   y descomprímalo. Luego ejecute:
+   y descomprímalo. El directorio debe contener carpetas `A`, `B`, ..., `Z` con las
+   imágenes de cada seña. Luego ejecute:
    ```bash
    python train_model.py /ruta/al/asl_alphabet_train asl_model.pkl
    ```
