@@ -1,3 +1,6 @@
 backend/.venv
 **/__pycache__/
 frontend/.idea/gradle.xml
+backend/archive/
+*.zip
+*.pkl
