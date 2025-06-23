@@ -3,3 +3,5 @@ flask-sock
 opencv-python
 mediapipe
 numpy
+scikit-learn
+
