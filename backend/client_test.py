@@ -49,6 +49,7 @@ async def send_video(uri: str) -> None:
 
                 keypoints = data.get("keypoints", [])
                 topology = data.get("topology", [])
+                letter = data.get("letter", "")
 
                 if keypoints:
                     _draw_landmarks(frame, keypoints, topology)
@@ -62,6 +63,17 @@ async def send_video(uri: str) -> None:
                     (0, 255, 0),
                     2,
                 )
+
+                if letter:
+                    cv2.putText(
+                        frame,
+                        f"Letra: {letter}",
+                        (10, 60),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        1,
+                        (0, 255, 0),
+                        2,
+                    )
 
                 cv2.imshow("Client Frame", frame)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
