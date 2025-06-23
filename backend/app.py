@@ -91,8 +91,8 @@ def process_video(ws):
 
                     letter = predict_letter(hand_landmarks)
                     detected_letters.append(letter)
-                    if letter:
-                        print(f"Detected letter: {letter}")
+                    #if letter:
+                    #    print(f"Detected letter: {letter}")
 
             response = {
                 "keypoints": keypoints if keypoints else [],
