@@ -3,5 +3,4 @@ backend/.venv
 frontend/.idea/gradle.xml
 backend/archive/
 *.zip
-*.pkl
 gradle_test.log

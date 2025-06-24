@@ -184,7 +184,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun initWebSocket() {
-        val uri = URI("ws://192.168.1.25:5000/ws")
+        val uri = URI("ws://glmuller.ddns.net:5000/ws")
         socket = object : WebSocketClient(uri) {
             override fun onOpen(handshakedata: ServerHandshake?) {
                 isSocketConnected = true
