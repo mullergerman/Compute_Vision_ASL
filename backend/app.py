@@ -16,6 +16,17 @@ hands = mp_hands.Hands(static_image_mode=False,
                        min_detection_confidence=0.5,
                        min_tracking_confidence=0.5)
 
+
+def _center_crop_square(img: "np.ndarray") -> "np.ndarray":
+    """Return a square crop centered in the image."""
+    h, w = img.shape[:2]
+    if h == w:
+        return img
+    side = min(h, w)
+    y0 = (h - side) // 2
+    x0 = (w - side) // 2
+    return img[y0 : y0 + side, x0 : x0 + side]
+
 DEFAULT_TOPOLOGY = [
     (
         c[0].value if hasattr(c[0], "value") else c[0],
@@ -67,6 +78,9 @@ def process_video(ws):
             frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
             if frame is None:
                 continue
+
+            # Normalize aspect ratio to a square image to avoid MediaPipe warnings
+            frame = _center_crop_square(frame)
 
             # Convertir a RGB
             image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
