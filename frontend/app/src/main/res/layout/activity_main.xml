@@ -26,6 +26,16 @@
         android:padding="8dp" />
 
     <TextView
+        android:id="@+id/fpsTextView"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="end|top"
+        android:textColor="@android:color/holo_green_light"
+        android:text="0 fps"
+        android:textSize="16sp"
+        android:padding="8dp" />
+
+    <TextView
         android:id="@+id/letterTextView"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
