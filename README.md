@@ -28,6 +28,10 @@ Este repositorio contiene un ejemplo de sistema de reconocimiento de señas ASL 
 - Python 3.8 o superior para el backend
 - Android Studio (o las herramientas de Android SDK) para compilar la app
 
+**Nota**: el servidor recorta cada fotograma a un cuadro central antes de
+procesarlo con MediaPipe. Esto evita advertencias en versiones recientes de
+MediaPipe cuando la imagen de entrada no es cuadrada.
+
 ## Puesta en marcha del backend
 
 1. Crear un entorno virtual y activar:

@@ -13,6 +13,17 @@ from sklearn.linear_model import LogisticRegression
 LETTERS: List[str] = [chr(c) for c in range(ord("A"), ord("Z") + 1)]
 
 
+def _center_crop_square(img: np.ndarray) -> np.ndarray:
+    """Return a square crop of the given image."""
+    h, w = img.shape[:2]
+    if h == w:
+        return img
+    side = min(h, w)
+    y0 = (h - side) // 2
+    x0 = (w - side) // 2
+    return img[y0 : y0 + side, x0 : x0 + side]
+
+
 def _extract_features(hand_landmarks) -> List[float]:
     """Return a flat list of x, y, z coordinates from hand landmarks."""
     feats: List[float] = []
@@ -46,6 +57,7 @@ def _load_dataset(data_dir: str) -> Tuple[np.ndarray, np.ndarray]:
                 img = cv2.imread(path)
                 if img is None:
                     continue
+                img = _center_crop_square(img)
                 img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
                 results = hands.process(img_rgb)
                 if not results.multi_hand_landmarks:
