@@ -25,17 +25,22 @@ import java.util.ArrayDeque
 import androidx.appcompat.app.AppCompatActivity
 import org.json.JSONArray
 
+import java.util.concurrent.atomic.AtomicBoolean
+
 
 class MainActivity : AppCompatActivity() {
     private lateinit var previewView: PreviewView
     private lateinit var overlay: SurfaceView
     private lateinit var delayTextView: TextView
+    private lateinit var fpsTextView: TextView
     private lateinit var letterTextView: TextView
     private lateinit var switchCameraButton: Button
     private var socket: WebSocketClient? = null
     private var isSocketConnected: Boolean = false
 
     private val sendTimes: ArrayDeque<Long> = ArrayDeque()
+    private val waitingForResponse = AtomicBoolean(false)
+    private var lastFrameTime: Long = 0
 
     private var cameraProvider: ProcessCameraProvider? = null
     private var lensFacing: Int = CameraSelector.LENS_FACING_FRONT
@@ -49,6 +54,7 @@ class MainActivity : AppCompatActivity() {
         previewView = findViewById(R.id.previewView)
         overlay = findViewById(R.id.overlay)
         delayTextView = findViewById(R.id.delayTextView)
+        fpsTextView = findViewById(R.id.fpsTextView)
         letterTextView = findViewById(R.id.letterTextView)
         switchCameraButton = findViewById(R.id.switchCameraButton)
         // Make sure overlay is transparent and on top
@@ -134,6 +140,11 @@ class MainActivity : AppCompatActivity() {
             .build()
 
         imageAnalysis.setAnalyzer(ContextCompat.getMainExecutor(this)) { imageProxy ->
+            if (waitingForResponse.get()) {
+                imageProxy.close()
+                return@setAnalyzer
+            }
+
             val bitmap = imageProxyToBitmap(imageProxy)
             sendFrameToServer(bitmap)
             imageProxy.close()
@@ -181,6 +192,7 @@ class MainActivity : AppCompatActivity() {
         bitmap.compress(Bitmap.CompressFormat.JPEG, 60, baos)
         sendTimes.add(System.currentTimeMillis())
         socket?.send(baos.toByteArray())
+        waitingForResponse.set(true)
     }
 
     private fun initWebSocket() {
@@ -192,15 +204,20 @@ class MainActivity : AppCompatActivity() {
 
             override fun onMessage(message: String?) {
                 val sendTime = if (sendTimes.isNotEmpty()) sendTimes.removeFirst() else null
-                val delay = sendTime?.let { System.currentTimeMillis() - it } ?: 0L
+                val now = System.currentTimeMillis()
+                val delay = sendTime?.let { now - it } ?: 0L
+                val fps = if (lastFrameTime != 0L) 1000f / (now - lastFrameTime) else 0f
+                lastFrameTime = now
                 runOnUiThread {
                     delayTextView.text = "${delay} ms"
+                    fpsTextView.text = String.format("%.1f fps", fps)
                     if (message != null) {
                         val json = JSONObject(message)
                         letterTextView.text = json.optString("letter", "")
                         drawOverlay(json)
                     }
                 }
+                waitingForResponse.set(false)
             }
 
             override fun onClose(code: Int, reason: String?, remote: Boolean) {
