@@ -68,7 +68,7 @@
             "uid": "InfluxDB"
           },
           "refId": "A",
-          "query": "from(bucket: \"example-bucket\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"client.delay_ms\" and r.session == \"${session}\" and r.fe =~ /${fe}/)\n  |> group(columns:[\"session\",\"fe\",\"device\",\"net\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)",
+          "query": "from(bucket: \"example-bucket\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"client.delay_ms\" and r.session == \"${session}\" and r.fe =~ /${fe}/)\n  |> group(columns:[\"session\",\"fe\",\"device\",\"net\"])\n  |> aggregateWindow(every: 1ms, fn: mean, createEmpty: false)",
           "queryType": "flux"
         }
       ],
@@ -106,7 +106,7 @@
             "uid": "InfluxDB"
           },
           "refId": "B",
-          "query": "from(bucket: \"example-bucket\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"client.delay_ms\" and r.session == \"${session}\" and r.fe =~ /${fe}/)\n  |> quantile(q: 0.95)",
+          "query": "from(bucket: \"example-bucket\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"client.delay_ms\" and r.session == \"${session}\" and r.fe =~ /${fe}/)\n  |> aggregateWindow(every: 1ms, fn: mean, createEmpty: false)\n  |> quantile(q: 0.95)",
           "queryType": "flux"
         }
       ],
@@ -140,7 +140,7 @@
             "uid": "InfluxDB"
           },
           "refId": "C",
-          "query": "from(bucket: \"example-bucket\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"client.delay_ms\" and r.session == \"${session}\" and r.fe =~ /${fe}/)\n  |> mean()",
+          "query": "from(bucket: \"example-bucket\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"client.delay_ms\" and r.session == \"${session}\" and r.fe =~ /${fe}/)\n  |> aggregateWindow(every: 1ms, fn: mean, createEmpty: false)\n  |> mean()",
           "queryType": "flux"
         }
       ],
@@ -174,7 +174,7 @@
             "uid": "InfluxDB"
           },
           "refId": "D",
-          "query": "from(bucket: \"example-bucket\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"client.delay_ms\" and r.session == \"${session}\" and r.fe =~ /${fe}/)\n  |> max()",
+          "query": "from(bucket: \"example-bucket\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"client.delay_ms\" and r.session == \"${session}\" and r.fe =~ /${fe}/)\n  |> aggregateWindow(every: 1ms, fn: max, createEmpty: false)\n  |> max()",
           "queryType": "flux"
         }
       ],
