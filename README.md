@@ -57,7 +57,20 @@ MediaPipe cuando la imagen de entrada no es cuadrada.
    ```
    El servidor quedar\u00e1 escuchando en `ws://0.0.0.0:5000/ws`.
 
+
 Para realizar pruebas rápidas se puede usar `client_test.py`, que abre la cámara del PC y se conecta al WebSocket local.
+
+### Métricas de rendimiento
+
+El backend envía los tiempos de procesamiento de MediaPipe y de clasificación ASL a un servidor Graphite usando el protocolo de texto plano.
+Los parámetros de conexión pueden configurarse con las siguientes variables de entorno:
+
+```bash
+export GRAPHITE_HOST="localhost"   # Nombre o IP del servidor Graphite
+export GRAPHITE_PORT="2003"        # Puerto del servicio carbon
+```
+
+Si no se definen, se utilizarán los valores por defecto mostrados arriba.
 
 ## Ejecución del frontend
 

@@ -1,11 +1,14 @@
 import cv2
 import numpy as np
 import json
+import os
+import socket
+import time
+
 from flask import Flask
 from flask_sock import Sock
 import mediapipe as mp
 import pickle
-import time
 
 app = Flask(__name__)
 sock = Sock(app)
@@ -26,6 +29,21 @@ DEFAULT_TOPOLOGY = [
     )
     for c in mp_hands.HAND_CONNECTIONS
 ]
+
+# Graphite configuration
+GRAPHITE_HOST = os.getenv("GRAPHITE_HOST", "localhost")
+GRAPHITE_PORT = int(os.getenv("GRAPHITE_PORT", "2003"))
+
+
+def send_metric(name: str, value: float) -> None:
+    """Send a single metric to Graphite using the plaintext protocol."""
+    timestamp = int(time.time())
+    message = f"{name} {value} {timestamp}\n"
+    try:
+        with socket.create_connection((GRAPHITE_HOST, GRAPHITE_PORT), timeout=1) as sock_conn:
+            sock_conn.sendall(message.encode("utf-8"))
+    except OSError as exc:
+        app.logger.warning("Failed to send metric %s: %s", name, exc)
 
 # Load ASL classification model with better error handling
 def load_model():
@@ -113,9 +131,11 @@ def process_video(ws):
 
             # Calcular tiempo total
             total_processing_time = mediapipe_processing_time + asl_processing_time
-            
-            # Mostrar tiempos en la consola (una línea)
-            print(f"MediaPipe: {mediapipe_processing_time:.2f}ms | ASL: {asl_processing_time:.2f}ms | Total: {total_processing_time:.2f}ms")
+
+            # Enviar métricas a Graphite
+            send_metric("mediapipe.delay_ms", mediapipe_processing_time)
+            send_metric("asl.delay_ms", asl_processing_time)
+            send_metric("total.delay_ms", total_processing_time)
 
             response = {
                 "keypoints": keypoints if keypoints else [],
@@ -131,4 +151,4 @@ def process_video(ws):
             continue
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host="0.0.0.0", port=5000)
