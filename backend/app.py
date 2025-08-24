@@ -36,7 +36,7 @@ GRAPHITE_PORT = int(os.getenv("GRAPHITE_PORT", "2003"))
 
 def send_metric(name: str, value: float) -> None:
     """Send a single metric to Graphite using the plaintext protocol."""
-    timestamp = int(time.time())
+    timestamp = time.time()
     message = f"{name} {value} {timestamp}\n"
     try:
         with socket.create_connection((GRAPHITE_HOST, GRAPHITE_PORT), timeout=1) as sock_conn:
