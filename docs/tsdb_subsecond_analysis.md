@@ -24,10 +24,6 @@ Este documento resume el análisis de viabilidad para almacenar métricas con re
 - **Desventajas**: requiere servicio adicional y gestión de usuarios/buckets.
 - **Conclusión**: **Recomendada** para métricas de alta frecuencia.
 
-### 3. Graphite + ClickHouse/Metrictank
-- **Ventajas**: continuidad con la pila existente de Graphite; ClickHouse/Metrictank soportan resoluciones sub‑segundo.
-- **Desventajas**: complejidad operativa alta (múltiples componentes) y ecosistema menos activo.
-- **Conclusión**: viable pero más costoso de mantener.
 
 ## Prototipo propuesto con InfluxDB
 1. **Despliegue**

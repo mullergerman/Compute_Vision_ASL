@@ -1,9 +1,6 @@
 import cv2
 import numpy as np
 import json
-import os
-import socket
-import time
 
 from flask import Flask
 from flask_sock import Sock
@@ -30,19 +27,6 @@ DEFAULT_TOPOLOGY = [
     for c in mp_hands.HAND_CONNECTIONS
 ]
 
-# Graphite configuration
-GRAPHITE_HOST = os.getenv("GRAPHITE_HOST", "localhost")
-GRAPHITE_PORT = int(os.getenv("GRAPHITE_PORT", "2003"))
-
-def send_metric(name: str, value: float) -> None:
-    """Send a single metric to Graphite using the plaintext protocol."""
-    timestamp = time.time()
-    message = f"{name} {value} {timestamp}\n"
-    try:
-        with socket.create_connection((GRAPHITE_HOST, GRAPHITE_PORT), timeout=1) as sock_conn:
-            sock_conn.sendall(message.encode("utf-8"))
-    except OSError as exc:
-        app.logger.warning("Failed to send metric %s: %s", name, exc)
 
 # Load ASL classification model with better error handling
 def load_model():
@@ -99,10 +83,7 @@ def process_video(ws):
             image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             
             # Process with warnings suppressed
-            mediapipe_start_time = time.time()
             results = hands.process(image_rgb)
-            mediapipe_end_time = time.time()
-            mediapipe_processing_time = (mediapipe_end_time - mediapipe_start_time) * 1000  # en milisegundos
 
             keypoints = []
             topology = []
@@ -123,18 +104,8 @@ def process_video(ws):
                         topology.append([start + base, end + base])
 
                     # Medir tiempo de predicción ASL
-                    asl_start_time = time.time()
                     letter = predict_letter(hand_landmarks)
-                    asl_end_time = time.time()
-                    asl_processing_time = (asl_end_time - asl_start_time) * 1000  # en milisegundos
 
-            # Calcular tiempo total
-            total_processing_time = mediapipe_processing_time + asl_processing_time
-
-            # Enviar métricas a Graphite
-            send_metric("mediapipe.delay_ms", mediapipe_processing_time)
-            send_metric("asl.delay_ms", asl_processing_time)
-            send_metric("total.delay_ms", total_processing_time)
 
             response = {
                 "keypoints": keypoints if keypoints else [],
@@ -150,5 +121,4 @@ def process_video(ws):
             continue
 
 if __name__ == "__main__":
-    print(f"Graphite server: {GRAPHITE_HOST}:{GRAPHITE_PORT}")
     app.run(host="0.0.0.0", port=5000)
