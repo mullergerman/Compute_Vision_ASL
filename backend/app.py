@@ -3,6 +3,8 @@ import numpy as np
 import json
 import os
 import logging
+import os
+import logging
 from flask import Flask
 from flask_sock import Sock
 import mediapipe as mp
@@ -60,7 +62,21 @@ def load_model():
     except Exception as e:
         print(f"Error loading model: {e}")
         return None
+# Load ASL classification model with better error handling
+def load_model():
+    try:
+        with open("asl_model.pkl", "rb") as f:
+            model = pickle.load(f)
+        print("ASL model loaded successfully")
+        return model
+    except FileNotFoundError:
+        print("Warning: ASL model 'asl_model.pkl' not found. Classification disabled.")
+        return None
+    except Exception as e:
+        print(f"Error loading model: {e}")
+        return None
 
+asl_model = load_model()
 asl_model = load_model()
 
 
@@ -81,11 +97,25 @@ def predict_letter(hand_landmarks) -> str:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             return asl_model.predict(features)[0]
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            return asl_model.predict(features)[0]
     except Exception:
         return ""
 
 @sock.route('/ws')
 def process_video(ws):
+    # Suppress MediaPipe warnings during initialization
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        hands_processor = mp_hands.Hands(
+            static_image_mode=False,
+            max_num_hands=2,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5,
+        )
+    
+    with hands_processor as hands:
     # Suppress MediaPipe warnings during initialization
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
@@ -114,6 +144,7 @@ def process_video(ws):
                 # Normalize aspect ratio to a square image to avoid MediaPipe warnings
                 frame = _center_crop_square(frame)
 
+                # Convert to RGB
                 # Convert to RGB
                 image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 
@@ -165,6 +196,7 @@ def process_video(ws):
                 ws.send(json.dumps(response))
 
             except Exception as e:
+                app.logger.exception("Error processing image: %s", e)
                 app.logger.exception("Error processing image: %s", e)
                 continue
 
