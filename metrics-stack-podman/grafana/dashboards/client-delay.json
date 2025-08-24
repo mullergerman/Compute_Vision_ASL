@@ -1,0 +1,170 @@
+{
+  "uid": "client-delay",
+  "title": "Client Delay (ms) por Sesión",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "tags": [
+    "client",
+    "delay",
+    "android"
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "session",
+        "label": "session",
+        "type": "query",
+        "datasource": "Graphite",
+        "refresh": 2,
+        "hide": 0,
+        "query": "tag_values('client.delay_ms','session')",
+        "multi": false,
+        "includeAll": false
+      },
+      {
+        "name": "fe",
+        "label": "fe",
+        "type": "query",
+        "datasource": "Graphite",
+        "refresh": 2,
+        "hide": 0,
+        "query": "tag_values('client.delay_ms','fe')",
+        "multi": false,
+        "includeAll": true,
+        "allValue": ".*"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Delay (ms) por sesión",
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Graphite",
+          "refId": "A",
+          "target": "aliasByTags(seriesByTag('name=client.delay_ms','session=$session','fe=~$fe'), 'session','fe','device','net')"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "lineWidth": 2
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "stat",
+      "title": "P95 (últimos 15 min)",
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 12
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Graphite",
+          "refId": "B",
+          "target": "nPercentile(seriesByTag('name=client.delay_ms','session=$session','fe=~$fe'),95)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Promedio (15 min)",
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 8,
+        "y": 12
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Graphite",
+          "refId": "C",
+          "target": "averageSeries(seriesByTag('name=client.delay_ms','session=$session','fe=~$fe'))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Máximo (15 min)",
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 16,
+        "y": 12
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Graphite",
+          "refId": "D",
+          "target": "maxSeries(seriesByTag('name=client.delay_ms','session=$session','fe=~$fe'))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        }
+      }
+    }
+  ],
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  }
+}
