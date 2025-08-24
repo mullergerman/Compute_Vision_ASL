@@ -4,3 +4,7 @@ frontend/.idea/gradle.xml
 backend/archive/
 *.zip
 gradle_test.log
+backend/tools
+frontend/app/build
+frontend/app/release
+
