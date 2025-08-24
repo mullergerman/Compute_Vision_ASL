@@ -8,30 +8,30 @@ metadata:
     io.podman.annotations.restart-policy: "always"
 spec:
   containers:
-    - name: graphite
-      image: graphiteapp/graphite-statsd:latest
+    - name: influxdb
+      image: influxdb:2.x
       ports:
-        - containerPort: 80
-          hostPort: 8080
+        - containerPort: 8086
+          hostPort: 8086
           protocol: TCP
-        - containerPort: 2003
-          hostPort: 2003
-          protocol: TCP
-        - containerPort: 2004
-          hostPort: 2004
-          protocol: TCP
-        - containerPort: 8125
-          hostPort: 8125
-          protocol: UDP
+      env:
+        - name: DOCKER_INFLUXDB_INIT_MODE
+          value: "setup"
+        - name: DOCKER_INFLUXDB_INIT_USERNAME
+          value: "admin"
+        - name: DOCKER_INFLUXDB_INIT_PASSWORD
+          value: "admin12345"
+        - name: DOCKER_INFLUXDB_INIT_ORG
+          value: "example-org"
+        - name: DOCKER_INFLUXDB_INIT_BUCKET
+          value: "example-bucket"
+        - name: DOCKER_INFLUXDB_INIT_ADMIN_TOKEN
+          value: "example-token"
       volumeMounts:
-        - name: graphite-storage
-          mountPath: /opt/graphite/storage
-        - name: graphite-schemas
-          mountPath: /opt/graphite/conf/storage-schemas.conf
-          subPath: storage-schemas.conf
-        - name: graphite-aggregation
-          mountPath: /opt/graphite/conf/storage-aggregation.conf
-          subPath: storage-aggregation.conf
+        - name: influxdb-data
+          mountPath: /var/lib/influxdb2
+        - name: influxdb-config
+          mountPath: /etc/influxdb2
 
     - name: grafana
       image: grafana/grafana:10.4.5
@@ -76,18 +76,14 @@ spec:
           mountPath: /etc/nginx/certs
 
   volumes:
-    - name: graphite-storage
+    - name: influxdb-data
       hostPath:
-        path: ./graphite/data
+        path: ./influxdb/data
         type: Directory
-    - name: graphite-schemas
+    - name: influxdb-config
       hostPath:
-        path: ./graphite/storage-schemas.conf
-        type: File
-    - name: graphite-aggregation
-      hostPath:
-        path: ./graphite/storage-aggregation.conf
-        type: File
+        path: ./influxdb/config
+        type: Directory
     - name: grafana-provisioning
       hostPath:
         path: ./grafana/provisioning
