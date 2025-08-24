@@ -1,6 +1,8 @@
 import cv2
 import numpy as np
 import json
+import os
+import logging
 from flask import Flask
 from flask_sock import Sock
 import mediapipe as mp
@@ -84,12 +86,17 @@ def predict_letter(hand_landmarks) -> str:
 
 @sock.route('/ws')
 def process_video(ws):
-    with mp_hands.Hands(
-        static_image_mode=False,
-        max_num_hands=2,
-        min_detection_confidence=0.5,
-        min_tracking_confidence=0.5,
-    ) as hands:
+    # Suppress MediaPipe warnings during initialization
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        hands_processor = mp_hands.Hands(
+            static_image_mode=False,
+            max_num_hands=2,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5,
+        )
+    
+    with hands_processor as hands:
         while True:
             data = ws.receive()
             if not data:
@@ -107,13 +114,21 @@ def process_video(ws):
                 # Normalize aspect ratio to a square image to avoid MediaPipe warnings
                 frame = _center_crop_square(frame)
 
-                # Convertir a RGB
+                # Convert to RGB
                 image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                results = hands.process(image_rgb)
+                
+                # Process with warnings suppressed
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    mediapipe_start_time = time.time()
+                    results = hands.process(image_rgb)
+                    mediapipe_end_time = time.time()
+                    mediapipe_processing_time = (mediapipe_end_time - mediapipe_start_time) * 1000  # en milisegundos
 
                 keypoints = []
                 topology = []
-                detected_letters = []
+                letter = []
+                asl_processing_time = 0
 
                 if results.multi_hand_landmarks:
                     for idx, hand_landmarks in enumerate(results.multi_hand_landmarks):
@@ -128,22 +143,29 @@ def process_video(ws):
                         for start, end in DEFAULT_TOPOLOGY:
                             topology.append([start + base, end + base])
 
+                        # Medir tiempo de predicción ASL
+                        asl_start_time = time.time()
                         letter = predict_letter(hand_landmarks)
-                        detected_letters.append(letter)
-                        #if letter:
-                        #    print(f"Detected letter: {letter}")
+                        asl_end_time = time.time()
+                        asl_processing_time = (asl_end_time - asl_start_time) * 1000  # en milisegundos
+
+                # Calcular tiempo total
+                total_processing_time = mediapipe_processing_time + asl_processing_time
+                
+                # Mostrar tiempos en la consola (una línea)
+                print(f"MediaPipe: {mediapipe_processing_time:.2f}ms | ASL: {asl_processing_time:.2f}ms | Total: {total_processing_time:.2f}ms")
 
                 response = {
                     "keypoints": keypoints if keypoints else [],
                     "topology": topology if topology else [],
-                    "image_width": frame.shape[1],  # ancho de la imagen
-                    "image_height": frame.shape[0],  # alto de la imagen
-                    "letter": detected_letters[0] if detected_letters else ""
+                    "image_width": frame.shape[1],
+                    "image_height": frame.shape[0],
+                    "letter": letter if letter else ""
                 }
                 ws.send(json.dumps(response))
 
             except Exception as e:
-                app.logger.exception("Error al procesar imagen: %s", e)
+                app.logger.exception("Error processing image: %s", e)
                 continue
 
 if __name__ == "__main__":
