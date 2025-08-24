@@ -258,6 +258,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun disconnectSocket(userInitiated: Boolean = false) {
         shouldReconnect = !userInitiated
+        waitingForResponse.set(false)
+        sendTimes.clear()
         closeSocket()
     }
 
@@ -303,6 +305,8 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     Toast.makeText(this@MainActivity, "Connection closed", Toast.LENGTH_SHORT).show()
                 }
+                waitingForResponse.set(false)
+                sendTimes.clear()
                 if (shouldReconnect) {
                     reconnectWithBackoff()
                 }
@@ -319,6 +323,8 @@ class MainActivity : AppCompatActivity() {
                         Toast.LENGTH_SHORT
                     ).show()
                 }
+                waitingForResponse.set(false)
+                sendTimes.clear()
                 if (shouldReconnect) {
                     reconnectWithBackoff()
                 }
