@@ -1,10 +1,25 @@
 import cv2
 import numpy as np
 import json
+import os
+import logging
 from flask import Flask
 from flask_sock import Sock
 import mediapipe as mp
 import pickle
+import warnings
+
+# Suppress specific warnings before importing other libraries
+warnings.filterwarnings('ignore', category=UserWarning, module='sklearn')
+warnings.filterwarnings('ignore', category=UserWarning, module='google.protobuf')
+
+# Set environment variables to suppress TensorFlow/MediaPipe warnings
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+os.environ['GLOG_minloglevel'] = '2'
+
+# Configure logging to reduce noise
+logging.getLogger('tensorflow').setLevel(logging.ERROR)
+logging.getLogger('absl').setLevel(logging.ERROR)
 
 app = Flask(__name__)
 sock = Sock(app)
@@ -31,14 +46,21 @@ DEFAULT_TOPOLOGY = [
     for c in mp_hands.HAND_CONNECTIONS
 ]
 
-# Load ASL classification model
-try:
-    with open("asl_model.pkl", "rb") as f:
-        asl_model = pickle.load(f)
-except FileNotFoundError:
-    asl_model = None
-    print("Warning: ASL model 'asl_model.pkl' not found. Classification disabled.")
+# Load ASL classification model with better error handling
+def load_model():
+    try:
+        with open("asl_model.pkl", "rb") as f:
+            model = pickle.load(f)
+        print("ASL model loaded successfully")
+        return model
+    except FileNotFoundError:
+        print("Warning: ASL model 'asl_model.pkl' not found. Classification disabled.")
+        return None
+    except Exception as e:
+        print(f"Error loading model: {e}")
+        return None
 
+asl_model = load_model()
 
 
 def _extract_features(hand_landmarks):
@@ -55,18 +77,25 @@ def predict_letter(hand_landmarks) -> str:
         return ""
     features = _extract_features(hand_landmarks)
     try:
-        return asl_model.predict(features)[0]
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            return asl_model.predict(features)[0]
     except Exception:
         return ""
 
 @sock.route('/ws')
 def process_video(ws):
-    with mp_hands.Hands(
-        static_image_mode=False,
-        max_num_hands=2,
-        min_detection_confidence=0.5,
-        min_tracking_confidence=0.5,
-    ) as hands:
+    # Suppress MediaPipe warnings during initialization
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        hands_processor = mp_hands.Hands(
+            static_image_mode=False,
+            max_num_hands=2,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5,
+        )
+    
+    with hands_processor as hands:
         while True:
             data = ws.receive()
             if not data:
@@ -84,9 +113,13 @@ def process_video(ws):
                 # Normalize aspect ratio to a square image to avoid MediaPipe warnings
                 frame = _center_crop_square(frame)
 
-                # Convertir a RGB
+                # Convert to RGB
                 image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                results = hands.process(image_rgb)
+                
+                # Process with warnings suppressed
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    results = hands.process(image_rgb)
 
                 keypoints = []
                 topology = []
@@ -107,21 +140,22 @@ def process_video(ws):
 
                         letter = predict_letter(hand_landmarks)
                         detected_letters.append(letter)
-                        #if letter:
-                        #    print(f"Detected letter: {letter}")
 
                 response = {
                     "keypoints": keypoints if keypoints else [],
                     "topology": topology if topology else [],
-                    "image_width": frame.shape[1],  # ancho de la imagen
-                    "image_height": frame.shape[0],  # alto de la imagen
+                    "image_width": frame.shape[1],
+                    "image_height": frame.shape[0],
                     "letter": detected_letters[0] if detected_letters else ""
                 }
                 ws.send(json.dumps(response))
 
             except Exception as e:
-                app.logger.exception("Error al procesar imagen: %s", e)
+                app.logger.exception("Error processing image: %s", e)
                 continue
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=5000)
+    # Suppress additional startup warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        app.run(host='0.0.0.0', port=5000)
