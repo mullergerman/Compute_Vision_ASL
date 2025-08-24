@@ -11,6 +11,7 @@ import android.widget.TextView
 import android.widget.Button
 import android.net.ConnectivityManager
 import android.net.Network
+import android.util.Log
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
@@ -57,6 +58,10 @@ class MainActivity : AppCompatActivity() {
 
     private val CAMERA_PERMISSION_REQUEST_CODE = 101
 
+    companion object {
+        private const val TAG = "MainActivity"
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -83,7 +88,10 @@ class MainActivity : AppCompatActivity() {
             bindCameraUseCases()
         }
 
-        connectButton.setOnClickListener { connectSocket() }
+        connectButton.setOnClickListener {
+            Log.i(TAG, "Connect button pressed")
+            connectSocket()
+        }
         disconnectButton.setOnClickListener { disconnectSocket(true) }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -233,7 +241,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun connectSocket() {
-        if (isSocketConnected || !isNetworkAvailable) return
+        if (isSocketConnected) {
+            Toast.makeText(this, "Socket already connected", Toast.LENGTH_SHORT).show()
+            Log.i(TAG, "Connection attempt aborted: already connected")
+            return
+        }
+        if (!isNetworkAvailable) {
+            Toast.makeText(this, "Network unavailable", Toast.LENGTH_SHORT).show()
+            Log.w(TAG, "Network unavailable; attempting connection anyway")
+        }
+        Log.i(TAG, "Starting connection attempt")
         shouldReconnect = true
         reconnectDelay = 1000
         initWebSocket()
@@ -256,6 +273,10 @@ class MainActivity : AppCompatActivity() {
             override fun onOpen(handshakedata: ServerHandshake?) {
                 isSocketConnected = true
                 reconnectDelay = 1000
+                Log.i(TAG, "WebSocket connected")
+                runOnUiThread {
+                    Toast.makeText(this@MainActivity, "Connected", Toast.LENGTH_SHORT).show()
+                }
             }
 
             override fun onMessage(message: String?) {
@@ -278,6 +299,10 @@ class MainActivity : AppCompatActivity() {
 
             override fun onClose(code: Int, reason: String?, remote: Boolean) {
                 isSocketConnected = false
+                Log.w(TAG, "WebSocket closed: $reason")
+                runOnUiThread {
+                    Toast.makeText(this@MainActivity, "Connection closed", Toast.LENGTH_SHORT).show()
+                }
                 if (shouldReconnect) {
                     reconnectWithBackoff()
                 }
@@ -286,6 +311,14 @@ class MainActivity : AppCompatActivity() {
             override fun onError(ex: Exception?) {
                 ex?.printStackTrace()
                 isSocketConnected = false
+                Log.e(TAG, "WebSocket error", ex)
+                runOnUiThread {
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Connection failed: ${ex?.message}",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
                 if (shouldReconnect) {
                     reconnectWithBackoff()
                 }
