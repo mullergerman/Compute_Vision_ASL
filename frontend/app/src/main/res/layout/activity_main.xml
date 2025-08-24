@@ -19,20 +19,24 @@
         android:id="@+id/delayTextView"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="start|top"
+        android:layout_gravity="start|bottom"
+        android:layout_marginBottom="24dp"
         android:textColor="@android:color/holo_green_light"
         android:text="0 ms"
         android:textSize="16sp"
+        android:background="#66000000"
         android:padding="8dp" />
 
     <TextView
         android:id="@+id/fpsTextView"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="end|top"
+        android:layout_gravity="end|bottom"
+        android:layout_marginBottom="24dp"
         android:textColor="@android:color/holo_green_light"
         android:text="0 fps"
         android:textSize="16sp"
+        android:background="#66000000"
         android:padding="8dp" />
 
     <TextView
