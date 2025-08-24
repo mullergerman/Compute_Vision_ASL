@@ -33,7 +33,6 @@ DEFAULT_TOPOLOGY = [
 # Graphite configuration
 GRAPHITE_HOST = os.getenv("GRAPHITE_HOST", "localhost")
 GRAPHITE_PORT = int(os.getenv("GRAPHITE_PORT", "2003"))
-print(f"Graphite server: {GRAPHITE_HOST}:{GRAPHITE_PORT}")
 
 def send_metric(name: str, value: float) -> None:
     """Send a single metric to Graphite using the plaintext protocol."""
@@ -151,4 +150,5 @@ def process_video(ws):
             continue
 
 if __name__ == "__main__":
+    print(f"Graphite server: {GRAPHITE_HOST}:{GRAPHITE_PORT}")
     app.run(host="0.0.0.0", port=5000)
