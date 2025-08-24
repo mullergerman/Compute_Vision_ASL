@@ -15,10 +15,10 @@
         "name": "session",
         "label": "session",
         "type": "query",
-        "datasource": "Graphite",
+        "datasource": "InfluxDB",
         "refresh": 2,
         "hide": 0,
-        "query": "tag_values('client.delay_ms','session')",
+        "query": "from(bucket: \"example-bucket\") |> range(start: -1h) |> filter(fn: (r) => r._measurement == \"client.delay_ms\") |> keep(columns: [\"session\"]) |> distinct(column: \"session\")",
         "multi": false,
         "includeAll": false
       },
@@ -26,10 +26,10 @@
         "name": "fe",
         "label": "fe",
         "type": "query",
-        "datasource": "Graphite",
+        "datasource": "InfluxDB",
         "refresh": 2,
         "hide": 0,
-        "query": "tag_values('client.delay_ms','fe')",
+        "query": "from(bucket: \"example-bucket\") |> range(start: -1h) |> filter(fn: (r) => r._measurement == \"client.delay_ms\") |> keep(columns: [\"fe\"]) |> distinct(column: \"fe\")",
         "multi": false,
         "includeAll": true,
         "allValue": ".*"
@@ -57,9 +57,10 @@
       },
       "targets": [
         {
-          "datasource": "Graphite",
+          "datasource": "InfluxDB",
           "refId": "A",
-          "target": "aliasByTags(seriesByTag('name=client.delay_ms','session=$session','fe=~$fe'), 'session','fe','device','net')"
+          "query": "from(bucket: \"example-bucket\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"client.delay_ms\" and r.session == \"${session}\" and r.fe =~ /${fe}/)\n  |> group(columns:[\"session\",\"fe\",\"device\",\"net\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)",
+          "queryType": "flux"
         }
       ],
       "fieldConfig": {
@@ -91,9 +92,10 @@
       },
       "targets": [
         {
-          "datasource": "Graphite",
+          "datasource": "InfluxDB",
           "refId": "B",
-          "target": "nPercentile(seriesByTag('name=client.delay_ms','session=$session','fe=~$fe'),95)"
+          "query": "from(bucket: \"example-bucket\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"client.delay_ms\" and r.session == \"${session}\" and r.fe =~ /${fe}/)\n  |> quantile(q: 0.95)",
+          "queryType": "flux"
         }
       ],
       "fieldConfig": {
@@ -121,9 +123,10 @@
       },
       "targets": [
         {
-          "datasource": "Graphite",
+          "datasource": "InfluxDB",
           "refId": "C",
-          "target": "averageSeries(seriesByTag('name=client.delay_ms','session=$session','fe=~$fe'))"
+          "query": "from(bucket: \"example-bucket\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"client.delay_ms\" and r.session == \"${session}\" and r.fe =~ /${fe}/)\n  |> mean()",
+          "queryType": "flux"
         }
       ],
       "fieldConfig": {
@@ -151,9 +154,10 @@
       },
       "targets": [
         {
-          "datasource": "Graphite",
+          "datasource": "InfluxDB",
           "refId": "D",
-          "target": "maxSeries(seriesByTag('name=client.delay_ms','session=$session','fe=~$fe'))"
+          "query": "from(bucket: \"example-bucket\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"client.delay_ms\" and r.session == \"${session}\" and r.fe =~ /${fe}/)\n  |> max()",
+          "queryType": "flux"
         }
       ],
       "fieldConfig": {
