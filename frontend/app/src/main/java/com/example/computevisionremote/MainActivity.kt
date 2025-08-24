@@ -45,6 +45,8 @@ class MainActivity : AppCompatActivity() {
     private var cameraProvider: ProcessCameraProvider? = null
     private var lensFacing: Int = CameraSelector.LENS_FACING_FRONT
 
+    private val jpegOutputStream = ByteArrayOutputStream()
+
     private val CAMERA_PERMISSION_REQUEST_CODE = 101
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -145,8 +147,8 @@ class MainActivity : AppCompatActivity() {
                 return@setAnalyzer
             }
 
-            val bitmap = imageProxyToBitmap(imageProxy)
-            sendFrameToServer(bitmap)
+            val jpegBytes = imageProxyToBitmap(imageProxy)
+            sendFrameToServer(jpegBytes)
             imageProxy.close()
         }
 
@@ -156,7 +158,7 @@ class MainActivity : AppCompatActivity() {
         provider.bindToLifecycle(this, selector, preview, imageAnalysis)
     }
 
-    private fun imageProxyToBitmap(image: ImageProxy): Bitmap {
+    private fun imageProxyToBitmap(image: ImageProxy): ByteArray {
         val yBuffer = image.planes[0].buffer
         val uBuffer = image.planes[1].buffer
         val vBuffer = image.planes[2].buffer
@@ -171,27 +173,28 @@ class MainActivity : AppCompatActivity() {
         uBuffer.get(nv21, ySize + vSize, uSize)
 
         val yuvImage = YuvImage(nv21, ImageFormat.NV21, image.width, image.height, null)
-        val out = ByteArrayOutputStream()
-        yuvImage.compressToJpeg(Rect(0, 0, image.width, image.height), 60, out)
-        val imageBytes = out.toByteArray()
+        jpegOutputStream.reset()
+        yuvImage.compressToJpeg(Rect(0, 0, image.width, image.height), 60, jpegOutputStream)
+        var imageBytes = jpegOutputStream.toByteArray()
 
-        val bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
         val rotation = image.imageInfo.rotationDegrees.toFloat()
         if (rotation != 0f) {
+            val bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
             val matrix = Matrix().apply { postRotate(rotation) }
-            return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+            val rotatedBitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+            jpegOutputStream.reset()
+            rotatedBitmap.compress(Bitmap.CompressFormat.JPEG, 60, jpegOutputStream)
+            imageBytes = jpegOutputStream.toByteArray()
         }
 
-        return bitmap
+        return imageBytes
     }
 
-    private fun sendFrameToServer(bitmap: Bitmap) {
+    private fun sendFrameToServer(frameBytes: ByteArray) {
         if (!isSocketConnected) return
 
-        val baos = ByteArrayOutputStream()
-        bitmap.compress(Bitmap.CompressFormat.JPEG, 60, baos)
         sendTimes.add(System.currentTimeMillis())
-        socket?.send(baos.toByteArray())
+        socket?.send(frameBytes)
         waitingForResponse.set(true)
     }
 
