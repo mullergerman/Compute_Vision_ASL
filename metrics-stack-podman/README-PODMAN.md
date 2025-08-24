@@ -1,4 +1,4 @@
-# Metrics Stack para **Podman** (Graphite + Grafana + Telegraf + Nginx TLS)
+# Metrics Stack para **Podman** (InfluxDB + Grafana + Telegraf + Nginx TLS)
 
 Este paquete usa **podman play kube** para desplegar un **Pod** con 4 contenedores.
 
@@ -9,11 +9,8 @@ Este paquete usa **podman play kube** para desplegar un **Pod** con 4 contenedor
 
 ## 2) Puertos publicados (host)
 - Grafana: **3000/tcp**
-- Graphite-Web: **8080/tcp**
-- Carbon plaintext: **2003/tcp**
-- Carbon pickle: **2004/tcp**
-- StatsD: **8125/udp**
-- Ingesta TLS (Nginx → Telegraf): **443/tcp**
+- InfluxDB: **8086/tcp**
+- Ingesta TLS (Nginx → Telegraf): **8443/tcp**
 
 ## 3) Arranque
 ```bash
@@ -42,7 +39,7 @@ podman play kube --down metrics-pod.yml
 
 ## 5) Endpoints
 - Grafana: https://localhost:3000 (user: `admin`, pass: `admin` — cambiá en el YAML si querés)
-- Graphite-Web: http://localhost:8080
+- InfluxDB: http://localhost:8086 (token `example-token`, org `example-org`)
 - Ingesta: `https://<tu-host>/ingest`  (valida **Bearer token**)
 - Health: `https://<tu-host>/ping`
 
@@ -73,7 +70,7 @@ val rttMs = (System.nanoTime() - t0) / 1e6
 
 // 2) Enviar JSON a /ingest
 val json = """
-{"measurement":"delay_ms","rt_ms":$rttMs,"ts":${'$'}{System.currentTimeMillis()},"session":"fe-123","fe":"edge-01","device":"SM-A236B","net":"lte"}
+{"measurement":"delay_ms","rt_ms":$rttMs,"ts":${System.currentTimeMillis()},"session":"fe-123","fe":"edge-01","device":"SM-A236B","net":"lte"}
 """.trimIndent()
 
 okHttp.newCall(
@@ -85,18 +82,35 @@ okHttp.newCall(
 ).execute().close()
 ```
 
-## 8) SELinux (Fedora/RHEL)
+## 8) InfluxDB — ejemplo de configuración
+Escribir un punto usando la API HTTP:
+```bash
+curl -XPOST "http://localhost:8086/api/v2/write?org=example-org&bucket=example-bucket&precision=ms" \
+  -H "Authorization: Token example-token" \
+  --data-raw "demo,host=test value=1i"
+```
+
+Configurar Telegraf para enviar a InfluxDB:
+```toml
+[[outputs.influxdb_v2]]
+  urls = ["http://127.0.0.1:8086"]
+  token = "example-token"
+  organization = "example-org"
+  bucket = "example-bucket"
+```
+
+## 9) SELinux (Fedora/RHEL)
 Si tenés SELinux en *enforcing*, etiquetá las carpetas montadas para que los contenedores puedan acceder:
 ```bash
-sudo chcon -Rt container_file_t $(pwd)/graphite $(pwd)/grafana $(pwd)/telegraf $(pwd)/nginx
+sudo chcon -Rt container_file_t $(pwd)/influxdb $(pwd)/grafana $(pwd)/telegraf $(pwd)/nginx
 ```
 > Alternativa: usar volúmenes gestionados por Podman (`podman volume create ...`) y referenciarlos con hostPath; o deshabilitar SELinux (no recomendado).
 
-## 9) Persistencia
-- **Graphite** persiste en `graphite/data` (WAL + whisper).
+## 10) Persistencia
+- **InfluxDB** persiste en `influxdb/data`.
 - **Grafana** persiste dashboards en `/var/lib/grafana/dashboards` (más configuración en provisioning).
 
-## 10) Notas
-- Telegraf habla con Carbon y Nginx por **localhost** porque el pod comparte netns.
-- Grafana datasource apunta a `http://127.0.0.1:8080` (Graphite-Web publicado al host). Si movés puertos, ajustalo en `grafana/provisioning/datasources/graphite.yml` y reiniciá el pod.
+## 11) Notas
+- Telegraf habla con InfluxDB y Nginx por **localhost** porque el pod comparte netns.
+- Grafana datasource apunta a `http://127.0.0.1:8086` (InfluxDB publicado al host). Si movés puertos, ajustalo en `grafana/provisioning/datasources/influxdb.yml` y reiniciá el pod.
 - Para autoinicio systemd (usuario): `podman generate systemd --new --name metrics-stack` después de levantar el pod una vez.

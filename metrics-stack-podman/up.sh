@@ -6,4 +6,4 @@ if [[ -n "${METRICS_TOKEN:-}" ]]; then
 fi
 podman play kube metrics-pod.yml
 podman ps --filter name=metrics-stack
-echo "Up. Grafana: https://localhost:3000  Graphite: http://localhost:8080  Ingest: https://localhost:8443/ingest"
+echo "Up. Grafana: https://localhost:3000  InfluxDB: http://localhost:8086  Ingest: https://localhost:8443/ingest"
