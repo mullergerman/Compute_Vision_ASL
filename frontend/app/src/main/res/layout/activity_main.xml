@@ -47,11 +47,31 @@
         android:textColor="@android:color/holo_red_light"
         android:textSize="48sp" />
 
-    <Button
-        android:id="@+id/switchCameraButton"
+    <LinearLayout
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Switch Camara"
         android:layout_gravity="end|bottom"
-        android:layout_margin="16dp" />
+        android:layout_margin="16dp"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/connectButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Conectar" />
+
+        <Button
+            android:id="@+id/disconnectButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Desconectar"
+            android:layout_marginStart="8dp" />
+
+        <Button
+            android:id="@+id/switchCameraButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Switch Camara"
+            android:layout_marginStart="8dp" />
+    </LinearLayout>
 </FrameLayout>
