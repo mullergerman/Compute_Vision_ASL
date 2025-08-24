@@ -4,13 +4,13 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.*
 import android.os.*
-import android.util.Base64
-import android.view.Surface
 import android.view.SurfaceView
 import android.content.res.Configuration
 import android.widget.Toast
 import android.widget.TextView
 import android.widget.Button
+import android.net.ConnectivityManager
+import android.net.Network
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
@@ -35,8 +35,16 @@ class MainActivity : AppCompatActivity() {
     private lateinit var fpsTextView: TextView
     private lateinit var letterTextView: TextView
     private lateinit var switchCameraButton: Button
+    private lateinit var connectButton: Button
+    private lateinit var disconnectButton: Button
+    private lateinit var connectivityManager: ConnectivityManager
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var isNetworkAvailable: Boolean = false
     private var socket: WebSocketClient? = null
     private var isSocketConnected: Boolean = false
+    private var shouldReconnect: Boolean = true
+    private var reconnectDelay: Long = 1000
+    private val maxReconnectDelay: Long = 16000
 
     private val sendTimes: ArrayDeque<Long> = ArrayDeque()
     private val waitingForResponse = AtomicBoolean(false)
@@ -59,6 +67,9 @@ class MainActivity : AppCompatActivity() {
         fpsTextView = findViewById(R.id.fpsTextView)
         letterTextView = findViewById(R.id.letterTextView)
         switchCameraButton = findViewById(R.id.switchCameraButton)
+        connectButton = findViewById(R.id.connectButton)
+        disconnectButton = findViewById(R.id.disconnectButton)
+        connectivityManager = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
         // Make sure overlay is transparent and on top
         overlay.setZOrderOnTop(true)
         overlay.holder.setFormat(PixelFormat.TRANSPARENT)
@@ -72,12 +83,35 @@ class MainActivity : AppCompatActivity() {
             bindCameraUseCases()
         }
 
+        connectButton.setOnClickListener { connectSocket() }
+        disconnectButton.setOnClickListener { disconnectSocket(true) }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            networkCallback = object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) {
+                    isNetworkAvailable = true
+                    if (!isSocketConnected) {
+                        connectSocket()
+                    }
+                }
+
+                override fun onLost(network: Network) {
+                    isNetworkAvailable = false
+                    disconnectSocket()
+                    runOnUiThread {
+                        Toast.makeText(this@MainActivity, "Network connection lost", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+            networkCallback?.let { connectivityManager.registerDefaultNetworkCallback(it) }
+            isNetworkAvailable = connectivityManager.activeNetwork != null
+        }
+
         if (isCameraPermissionGranted()) {
             initCamera()
         } else {
             requestCameraPermission()
         }
-        initWebSocket() // You can initialize this regardless of camera for now
     }
 
 
@@ -198,11 +232,30 @@ class MainActivity : AppCompatActivity() {
         waitingForResponse.set(true)
     }
 
+    private fun connectSocket() {
+        if (isSocketConnected || !isNetworkAvailable) return
+        shouldReconnect = true
+        reconnectDelay = 1000
+        initWebSocket()
+    }
+
+    private fun disconnectSocket(userInitiated: Boolean = false) {
+        shouldReconnect = !userInitiated
+        closeSocket()
+    }
+
+    private fun closeSocket() {
+        socket?.close()
+        socket = null
+        isSocketConnected = false
+    }
+
     private fun initWebSocket() {
         val uri = URI("ws://glmuller.ddns.net:5000/ws")
         socket = object : WebSocketClient(uri) {
             override fun onOpen(handshakedata: ServerHandshake?) {
                 isSocketConnected = true
+                reconnectDelay = 1000
             }
 
             override fun onMessage(message: String?) {
@@ -225,22 +278,38 @@ class MainActivity : AppCompatActivity() {
 
             override fun onClose(code: Int, reason: String?, remote: Boolean) {
                 isSocketConnected = false
-                reconnectWebSocketWithDelay()
+                if (shouldReconnect) {
+                    reconnectWithBackoff()
+                }
             }
 
             override fun onError(ex: Exception?) {
                 ex?.printStackTrace()
                 isSocketConnected = false
-                reconnectWebSocketWithDelay()
+                if (shouldReconnect) {
+                    reconnectWithBackoff()
+                }
             }
         }
         socket?.connect()
     }
 
-    private fun reconnectWebSocketWithDelay() {
+    private fun reconnectWithBackoff() {
+        if (!shouldReconnect || isSocketConnected || !isNetworkAvailable) return
+
         Handler(Looper.getMainLooper()).postDelayed({
-            initWebSocket()
-        }, 5000)
+            if (shouldReconnect && !isSocketConnected && isNetworkAvailable) {
+                initWebSocket()
+            }
+        }, reconnectDelay)
+
+        reconnectDelay = (reconnectDelay * 2).coerceAtMost(maxReconnectDelay)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        networkCallback?.let { connectivityManager.unregisterNetworkCallback(it) }
+        disconnectSocket(true)
     }
 
     private fun drawOverlay(json: JSONObject) {
