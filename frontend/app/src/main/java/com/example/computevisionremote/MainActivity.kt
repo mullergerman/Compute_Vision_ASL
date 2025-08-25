@@ -57,6 +57,11 @@ class MainActivity : AppCompatActivity() {
     private val waitingForResponse = AtomicBoolean(false)
     private var lastFrameTime: Long = 0
     private var lastFrameSentTime: Long = 0
+    private var lastProcessedTime: Long = 0
+
+    // Keypoint smoothing
+    private var previousKeypoints: MutableList<PointF>? = null
+    private val smoothingAlpha = 0.7f // 0.0 = no smoothing, 1.0 = maximum smoothing
 
     private var cameraProvider: ProcessCameraProvider? = null
     private var lensFacing: Int = CameraSelector.LENS_FACING_FRONT
@@ -214,10 +219,18 @@ class MainActivity : AppCompatActivity() {
             .build()
 
         imageAnalysis.setAnalyzer(ContextCompat.getMainExecutor(this)) { imageProxy ->
+            val currentTime = System.currentTimeMillis()
+            
+            // Limit frame rate to ~10 FPS (100ms between frames)
+            if (currentTime - lastProcessedTime < 100) {
+                Log.d(TAG, "Skipping frame - frame rate limit")
+                imageProxy.close()
+                return@setAnalyzer
+            }
+            
             // Check if we're waiting for response with timeout
             if (waitingForResponse.get()) {
-                val currentTime = System.currentTimeMillis()
-                if (currentTime - lastFrameSentTime < 500) { // 500ms timeout
+                if (currentTime - lastFrameSentTime < 1500) { // 1.5s timeout - more aggressive
                     Log.d(TAG, "Skipping frame - waiting for response")
                     imageProxy.close()
                     return@setAnalyzer
@@ -227,6 +240,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
+            lastProcessedTime = currentTime
             val yuvData = imageProxyToYuvWithMetadata(imageProxy)
             sendFrameToServer(yuvData)
             imageProxy.close()
@@ -241,8 +255,16 @@ class MainActivity : AppCompatActivity() {
     private fun imageProxyToYuvWithMetadata(image: ImageProxy): ByteArray {
         Log.d(TAG, "Converting ImageProxy to YUV data - size: ${image.width}x${image.height}, format: ${image.format}")
 
-        val width = image.width
-        val height = image.height
+        val originalWidth = image.width
+        val originalHeight = image.height
+        
+        // Force downsampling to max 160x160 for much faster processing
+        val targetSize = 160
+        val scale = minOf(targetSize.toFloat() / originalWidth, targetSize.toFloat() / originalHeight)
+        val width = (originalWidth * scale).toInt()
+        val height = (originalHeight * scale).toInt()
+        
+        Log.d(TAG, "Downsampling from ${originalWidth}x${originalHeight} to ${width}x${height} (scale: $scale)")
         val rotation = image.imageInfo.rotationDegrees
 
         // Y, U and V planes
@@ -260,42 +282,32 @@ class MainActivity : AppCompatActivity() {
         Log.d(TAG, "V plane: stride=${vPlane.rowStride}, pixelStride=${vPlane.pixelStride}, buffer size=${vPlane.buffer.remaining()}")
         
         val yuvTime = measureTimeMillis {
-            // ----- Copy Y plane (optimized) -----
+            // ----- Downsample Y plane -----
             val yBuffer = yPlane.buffer
             val yRowStride = yPlane.rowStride
             val yPixelStride = yPlane.pixelStride
             
             val yTime = measureTimeMillis {
-                if (yPixelStride == 1 && yRowStride == width) {
-                    // Optimal case: contiguous data, copy entire buffer at once
-                    Log.d(TAG, "Using optimal Y plane copy (contiguous)")
-                    yBuffer.position(0)
-                    yBuffer.get(nv21, 0, width * height)
-                    offset = width * height
-                } else if (yPixelStride == 1) {
-                    // Copy row by row (padding in stride)
-                    Log.d(TAG, "Using row-by-row Y plane copy (stride=$yRowStride, width=$width)")
-                    for (row in 0 until height) {
-                        yBuffer.position(row * yRowStride)
-                        yBuffer.get(nv21, offset, width)
-                        offset += width
-                    }
-                } else {
-                    // Worst case: pixel stride > 1, copy pixel by pixel
-                    Log.d(TAG, "Using pixel-by-pixel Y plane copy (pixelStride=$yPixelStride) - SLOW!")
-                    val rowData = ByteArray(yRowStride)
-                    for (row in 0 until height) {
-                        yBuffer.position(row * yRowStride)
-                        yBuffer.get(rowData, 0, minOf(yRowStride, yBuffer.remaining()))
-                        for (col in 0 until width) {
-                            nv21[offset++] = rowData[col * yPixelStride]
+                // Extract downsampled Y plane with bounds checking
+                for (row in 0 until height) {
+                    val srcRow = (row / scale).toInt().coerceAtMost(originalHeight - 1) // Map to source row
+                    for (col in 0 until width) {
+                        val srcCol = (col / scale).toInt().coerceAtMost(originalWidth - 1) // Map to source col
+                        val srcPos = srcRow * yRowStride + srcCol * yPixelStride
+                        if (srcPos < yBuffer.limit()) {
+                            yBuffer.position(srcPos)
+                            nv21[offset++] = yBuffer.get()
+                        } else {
+                            // If position is out of bounds, use the last valid pixel
+                            yBuffer.position(yBuffer.limit() - 1)
+                            nv21[offset++] = yBuffer.get()
                         }
                     }
                 }
             }
-            Log.d(TAG, "Y plane extraction took $yTime ms")
+            Log.d(TAG, "Y plane downsampling took $yTime ms")
 
-            // ----- Copy UV planes (optimized) -----
+            // ----- Downsample UV planes -----
             val uBuffer = uPlane.buffer
             val vBuffer = vPlane.buffer
             val uRowStride = uPlane.rowStride
@@ -304,46 +316,23 @@ class MainActivity : AppCompatActivity() {
             val uvHeight = height / 2
             val uvWidth = width / 2
 
-            if (uvPixelStride == 1 && uRowStride == uvWidth && vRowStride == uvWidth) {
-                // Optimal case: read entire UV planes and interleave
-                val uData = ByteArray(uvWidth * uvHeight)
-                val vData = ByteArray(uvWidth * uvHeight)
-                uBuffer.position(0)
-                vBuffer.position(0)
-                uBuffer.get(uData)
-                vBuffer.get(vData)
-                
-                for (i in 0 until uvWidth * uvHeight) {
-                    nv21[offset++] = vData[i]
-                    nv21[offset++] = uData[i]
-                }
-            } else if (uvPixelStride == 1) {
-                // Copy row by row and interleave
-                val vRow = ByteArray(uvWidth)
-                val uRow = ByteArray(uvWidth)
-                for (row in 0 until uvHeight) {
-                    vBuffer.position(row * vRowStride)
-                    uBuffer.position(row * uRowStride)
-                    vBuffer.get(vRow, 0, minOf(uvWidth, vBuffer.remaining()))
-                    uBuffer.get(uRow, 0, minOf(uvWidth, uBuffer.remaining()))
-                    for (col in 0 until uvWidth) {
-                        nv21[offset++] = vRow[col]
-                        nv21[offset++] = uRow[col]
-                    }
-                }
-            } else {
-                // Worst case: pixel stride > 1
-                val uRowData = ByteArray(uRowStride)
-                val vRowData = ByteArray(vRowStride)
-                for (row in 0 until uvHeight) {
-                    uBuffer.position(row * uRowStride)
-                    vBuffer.position(row * vRowStride)
-                    uBuffer.get(uRowData, 0, minOf(uRowStride, uBuffer.remaining()))
-                    vBuffer.get(vRowData, 0, minOf(vRowStride, vBuffer.remaining()))
-                    for (col in 0 until uvWidth) {
-                        nv21[offset++] = vRowData[col * uvPixelStride]
-                        nv21[offset++] = uRowData[col * uvPixelStride]
-                    }
+            // Downsample UV planes and interleave (NV21 format: V,U,V,U...) with bounds checking
+            for (row in 0 until uvHeight) {
+                val srcRow = (row * 2 / scale).toInt().coerceAtMost(originalHeight / 2 - 1) // UV planes are half resolution
+                for (col in 0 until uvWidth) {
+                    val srcCol = (col * 2 / scale).toInt().coerceAtMost(originalWidth / 2 - 1)
+                    val srcUPos = srcRow * uRowStride + srcCol * uvPixelStride
+                    val srcVPos = srcRow * vRowStride + srcCol * uvPixelStride
+                    
+                    // Check bounds for UV buffers
+                    val safeVPos = if (srcVPos < vBuffer.limit()) srcVPos else vBuffer.limit() - 1
+                    val safeUPos = if (srcUPos < uBuffer.limit()) srcUPos else uBuffer.limit() - 1
+                    
+                    vBuffer.position(safeVPos)
+                    uBuffer.position(safeUPos)
+                    
+                    nv21[offset++] = vBuffer.get() // V first (NV21 format)
+                    nv21[offset++] = uBuffer.get() // then U
                 }
             }
         }
@@ -763,13 +752,15 @@ class MainActivity : AppCompatActivity() {
         val offsetX = (viewWidth - imageWidth * scale) / 2f
         val offsetY = (viewHeight - imageHeight * scale) / 2f
 
-        // Dibujar puntos escalados
+        // Dibujar puntos escalados con suavizado
         val pointsRaw = json.opt("keypoints")
         Log.d("MainActivity", "pointsRaw: $pointsRaw, is JSONArray: ${pointsRaw is JSONArray}")
         if (pointsRaw is JSONArray) {
             val points = pointsRaw
-            val scaledPoints = mutableListOf<PointF>()
+            val currentKeypoints = mutableListOf<PointF>()
             Log.d("MainActivity", "Processing ${points.length()} keypoints")
+            
+            // First pass: collect current keypoints
             for (i in 0 until points.length()) {
                 val point = points.getJSONArray(i)
 
@@ -787,10 +778,39 @@ class MainActivity : AppCompatActivity() {
                     x = viewWidth - x
                 }
 
-                scaledPoints.add(PointF(x, y))
-                canvas.drawCircle(x, y, 10f, paint)
-                Log.d("MainActivity", "Drawing circle at ($x, $y)")
+                currentKeypoints.add(PointF(x, y))
             }
+            
+            // Apply smoothing if we have previous keypoints
+            val scaledPoints = mutableListOf<PointF>()
+            if (previousKeypoints != null && previousKeypoints!!.size == currentKeypoints.size) {
+                // Smooth each keypoint
+                for (i in currentKeypoints.indices) {
+                    val current = currentKeypoints[i]
+                    val previous = previousKeypoints!![i]
+                    
+                    // Linear interpolation: smoothed = previous * alpha + current * (1 - alpha)
+                    val smoothedX = previous.x * smoothingAlpha + current.x * (1 - smoothingAlpha)
+                    val smoothedY = previous.y * smoothingAlpha + current.y * (1 - smoothingAlpha)
+                    
+                    scaledPoints.add(PointF(smoothedX, smoothedY))
+                    canvas.drawCircle(smoothedX, smoothedY, 10f, paint)
+                    Log.d("MainActivity", "Drawing smoothed circle at ($smoothedX, $smoothedY)")
+                }
+            } else {
+                // First frame or keypoint count changed, use current keypoints
+                for (i in currentKeypoints.indices) {
+                    val current = currentKeypoints[i]
+                    scaledPoints.add(current)
+                    canvas.drawCircle(current.x, current.y, 10f, paint)
+                    Log.d("MainActivity", "Drawing initial circle at (${current.x}, ${current.y})")
+                }
+            }
+            
+            // Store current keypoints for next frame
+            previousKeypoints = currentKeypoints
+            
+            // Draw topology with smoothed points
 
             val topologyRaw = json.opt("topology")
             if (topologyRaw is JSONArray) {
