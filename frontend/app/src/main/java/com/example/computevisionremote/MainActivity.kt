@@ -243,11 +243,20 @@ class MainActivity : AppCompatActivity() {
         val yBuffer = yPlane.buffer
         val yRowStride = yPlane.rowStride
         val yPixelStride = yPlane.pixelStride
-        for (row in 0 until height) {
-            var yPos = row * yRowStride
-            for (col in 0 until width) {
-                nv21[offset++] = yBuffer.get(yPos)
-                yPos += yPixelStride
+        if (yPixelStride == 1) {
+            for (row in 0 until height) {
+                val yPos = row * yRowStride
+                yBuffer.position(yPos)
+                yBuffer.get(nv21, offset, width)
+                offset += width
+            }
+        } else {
+            for (row in 0 until height) {
+                var yPos = row * yRowStride
+                for (col in 0 until width) {
+                    nv21[offset++] = yBuffer.get(yPos)
+                    yPos += yPixelStride
+                }
             }
         }
 
@@ -258,14 +267,32 @@ class MainActivity : AppCompatActivity() {
         val vRowStride = vPlane.rowStride
         val uvPixelStride = uPlane.pixelStride  // same as vPlane.pixelStride
 
-        for (row in 0 until height / 2) {
-            var uPos = row * uRowStride
-            var vPos = row * vRowStride
-            for (col in 0 until width / 2) {
-                nv21[offset++] = vBuffer.get(vPos)
-                nv21[offset++] = uBuffer.get(uPos)
-                vPos += uvPixelStride
-                uPos += uvPixelStride
+        if (uvPixelStride == 1) {
+            val rowSize = width / 2
+            val vRow = ByteArray(rowSize)
+            val uRow = ByteArray(rowSize)
+            for (row in 0 until height / 2) {
+                vBuffer.position(row * vRowStride)
+                vBuffer.get(vRow, 0, rowSize)
+                uBuffer.position(row * uRowStride)
+                uBuffer.get(uRow, 0, rowSize)
+                var col = 0
+                while (col < rowSize) {
+                    nv21[offset++] = vRow[col]
+                    nv21[offset++] = uRow[col]
+                    col++
+                }
+            }
+        } else {
+            for (row in 0 until height / 2) {
+                var uPos = row * uRowStride
+                var vPos = row * vRowStride
+                for (col in 0 until width / 2) {
+                    nv21[offset++] = vBuffer.get(vPos)
+                    nv21[offset++] = uBuffer.get(uPos)
+                    vPos += uvPixelStride
+                    uPos += uvPixelStride
+                }
             }
         }
 
