@@ -191,7 +191,9 @@ class MainActivity : AppCompatActivity() {
 
         imageAnalysis.setAnalyzer(ContextCompat.getMainExecutor(this)) { imageProxy ->
             if (waitingForResponse.get()) {
+            Log.d("MainActivity", "Image analysis started - waitingForResponse: ${waitingForResponse.get()}")
                 imageProxy.close()
+                Log.d("MainActivity", "Skipping frame - waiting for response")
                 return@setAnalyzer
             }
 
@@ -207,6 +209,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun imageProxyToBitmap(image: ImageProxy): ByteArray {
+        Log.d("MainActivity", "Converting ImageProxy to JPEG - size: ${image.width}x${image.height}, format: ${image.format}")
         val yBuffer = image.planes[0].buffer
         val uBuffer = image.planes[1].buffer
         val vBuffer = image.planes[2].buffer
@@ -235,15 +238,18 @@ class MainActivity : AppCompatActivity() {
             imageBytes = jpegOutputStream.toByteArray()
         }
 
+        Log.d("MainActivity", "JPEG conversion completed - bytes: ${imageBytes.size}")
         return imageBytes
     }
 
     private fun sendFrameToServer(frameBytes: ByteArray) {
         if (!isSocketConnected) return
+        Log.d("MainActivity", "Sending frame to server - bytes: ${frameBytes.size}, socket connected: $isSocketConnected")
 
         sendTimes.add(System.currentTimeMillis())
         socket?.send(frameBytes)
         waitingForResponse.set(true)
+        Log.d("MainActivity", "Frame sent successfully via WebSocket")
     }
 
     private fun sendDelayToInfluxDB(delay: Long, fps: Float) {
@@ -329,6 +335,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onMessage(message: String?) {
+                Log.d("MainActivity", "WebSocket message received - delay: ${delay}ms, message length: ${message?.length ?: 0}")
                 val sendTime = if (sendTimes.isNotEmpty()) sendTimes.removeFirst() else null
                 val now = System.currentTimeMillis()
                 val delay = sendTime?.let { now - it } ?: 0L
