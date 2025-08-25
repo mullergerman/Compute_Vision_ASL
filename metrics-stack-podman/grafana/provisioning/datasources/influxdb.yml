@@ -5,6 +5,7 @@ datasources:
     type: influxdb
     access: proxy
     url: http://127.0.0.1:8086
+    uid: influxdb-uid
     isDefault: true
     editable: true
     jsonData:
