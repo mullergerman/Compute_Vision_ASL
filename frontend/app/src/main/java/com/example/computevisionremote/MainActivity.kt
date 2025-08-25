@@ -209,65 +209,66 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun imageProxyToBitmap(image: ImageProxy): ByteArray {
-        Log.d("MainActivity", "Converting ImageProxy to JPEG - size: ${image.width}x${image.height}, format: ${image.format}")
-        
-        // Get the YUV_420_888 planes
+        Log.d(TAG, "Converting ImageProxy to JPEG - size: ${image.width}x${image.height}, format: ${image.format}")
+
+        val width = image.width
+        val height = image.height
+
+        // Y, U and V planes
         val yPlane = image.planes[0]
         val uPlane = image.planes[1]
         val vPlane = image.planes[2]
-        
+
+        val expectedSize = width * height * 3 / 2
+        val nv21 = ByteArray(expectedSize)
+        var offset = 0
+
+        // ----- Copy Y plane row by row -----
         val yBuffer = yPlane.buffer
-        val uBuffer = uPlane.buffer
-        val vBuffer = vPlane.buffer
-        
-        val ySize = yBuffer.remaining()
-        val uSize = uBuffer.remaining()
-        val vSize = vBuffer.remaining()
-        
-        Log.d("MainActivity", "YUV plane sizes - Y: $ySize, U: $uSize, V: $vSize")
-        Log.d("MainActivity", "YUV plane strides - Y: ${yPlane.pixelStride}, U: ${uPlane.pixelStride}, V: ${vPlane.pixelStride}")
-        Log.d("MainActivity", "YUV row strides - Y: ${yPlane.rowStride}, U: ${uPlane.rowStride}, V: ${vPlane.rowStride}")
-        
-        // Convert YUV_420_888 to NV21 format properly
-        val nv21 = ByteArray(ySize + uSize + vSize)
-        
-        // Copy Y plane
-        yBuffer.get(nv21, 0, ySize)
-        
-        // For NV21, we need interleaved VU (not UV like NV12)
-        // Check if the UV planes are interleaved already
-        val uvPixelStride = uPlane.pixelStride
-        if (uvPixelStride == 1) {
-            // Planes are packed, copy directly but swap U and V for NV21
-            uBuffer.get(nv21, ySize, uSize)
-            vBuffer.get(nv21, ySize + uSize, vSize)
-        } else {
-            // Planes are semi-planar, need to interleave V and U for NV21
-            val uvBuffer = ByteArray(uSize + vSize)
-            vBuffer.get(uvBuffer, 0, vSize)
-            uBuffer.get(uvBuffer, vSize, uSize)
-            
-            // Interleave VU for NV21 format
-            var uvIndex = 0
-            for (i in 0 until uSize) {
-                nv21[ySize + uvIndex] = uvBuffer[i]  // V
-                nv21[ySize + uvIndex + 1] = uvBuffer[vSize + i]  // U
-                uvIndex += 2
+        val yRowStride = yPlane.rowStride
+        val yPixelStride = yPlane.pixelStride
+        for (row in 0 until height) {
+            var yPos = row * yRowStride
+            for (col in 0 until width) {
+                nv21[offset++] = yBuffer.get(yPos)
+                yPos += yPixelStride
             }
         }
-        
-        Log.d("MainActivity", "YUV to NV21 conversion completed")
-        
-        val yuvImage = YuvImage(nv21, ImageFormat.NV21, image.width, image.height, null)
+
+        // ----- Copy and interleave V and U planes (NV21) -----
+        val uBuffer = uPlane.buffer
+        val vBuffer = vPlane.buffer
+        val uRowStride = uPlane.rowStride
+        val vRowStride = vPlane.rowStride
+        val uvPixelStride = uPlane.pixelStride  // same as vPlane.pixelStride
+
+        for (row in 0 until height / 2) {
+            var uPos = row * uRowStride
+            var vPos = row * vRowStride
+            for (col in 0 until width / 2) {
+                nv21[offset++] = vBuffer.get(vPos)
+                nv21[offset++] = uBuffer.get(uPos)
+                vPos += uvPixelStride
+                uPos += uvPixelStride
+            }
+        }
+
+        // Ensure the array is the expected size before creating YuvImage
+        if (offset != expectedSize) {
+            Log.e(TAG, "NV21 array size mismatch: wrote $offset bytes, expected $expectedSize")
+            return ByteArray(0)
+        }
+
+        val yuvImage = YuvImage(nv21, ImageFormat.NV21, width, height, null)
         jpegOutputStream.reset()
-        yuvImage.compressToJpeg(Rect(0, 0, image.width, image.height), 80, jpegOutputStream)
+        yuvImage.compressToJpeg(Rect(0, 0, width, height), 80, jpegOutputStream)
         var imageBytes = jpegOutputStream.toByteArray()
-        
-        Log.d("MainActivity", "YUV to JPEG compression completed - bytes: ${imageBytes.size}")
+
+        Log.d(TAG, "YUV to JPEG compression completed - bytes: ${imageBytes.size}")
 
         val rotation = image.imageInfo.rotationDegrees.toFloat()
         if (rotation != 0f) {
-            Log.d("MainActivity", "Applying rotation: ${rotation} degrees")
+            Log.d(TAG, "Applying rotation: ${rotation} degrees")
             val bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
             val matrix = Matrix().apply { postRotate(rotation) }
             val rotatedBitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
@@ -276,7 +277,7 @@ class MainActivity : AppCompatActivity() {
             imageBytes = jpegOutputStream.toByteArray()
         }
 
-        Log.d("MainActivity", "JPEG conversion completed - final bytes: ${imageBytes.size}")
+        Log.d(TAG, "JPEG conversion completed - final bytes: ${imageBytes.size}")
         return imageBytes
     }
 
