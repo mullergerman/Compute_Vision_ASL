@@ -405,6 +405,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun drawOverlay(json: JSONObject) {
         val canvas = overlay.holder.lockCanvas()
+        Log.d("MainActivity", "drawOverlay called with JSON: ${json.toString()}")
         if (canvas == null) {
             Log.w("MainActivity", "Canvas is null, skipping overlay drawing")
             return
@@ -440,9 +441,11 @@ class MainActivity : AppCompatActivity() {
 
         // Dibujar puntos escalados
         val pointsRaw = json.opt("keypoints")
+        Log.d("MainActivity", "pointsRaw: $pointsRaw, is JSONArray: ${pointsRaw is JSONArray}")
         if (pointsRaw is JSONArray) {
             val points = pointsRaw
             val scaledPoints = mutableListOf<PointF>()
+            Log.d("MainActivity", "Processing ${points.length()} keypoints")
             for (i in 0 until points.length()) {
                 val point = points.getJSONArray(i)
 
@@ -462,10 +465,12 @@ class MainActivity : AppCompatActivity() {
 
                 scaledPoints.add(PointF(x, y))
                 canvas.drawCircle(x, y, 10f, paint)
+                Log.d("MainActivity", "Drawing circle at ($x, $y)")
             }
 
             val topologyRaw = json.opt("topology")
             if (topologyRaw is JSONArray) {
+                Log.d("MainActivity", "topologyRaw: $topologyRaw, is JSONArray: ${topologyRaw is JSONArray}, length: ${if (topologyRaw is JSONArray) topologyRaw.length() else "N/A"}")
                 for (i in 0 until topologyRaw.length()) {
                     val pair = topologyRaw.getJSONArray(i)
 
@@ -475,6 +480,7 @@ class MainActivity : AppCompatActivity() {
                         val p1 = scaledPoints[startIndex]
                         val p2 = scaledPoints[endIndex]
                         canvas.drawLine(p1.x, p1.y, p2.x, p2.y, linePaint)
+                        Log.d("MainActivity", "Drawing line from (${p1.x}, ${p1.y}) to (${p2.x}, ${p2.y})")
                     }
                 }
             }
