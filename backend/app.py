@@ -126,7 +126,7 @@ def process_video(ws):
                 "duration_asl_ms": duration_asl_ms,
                 "duration_mp_ms": duration_mp_ms
             }
-            metrics.record_metric("backend", {}, fields, ts)
+            metrics.record_metric("backend", {"endpoint": "ws"}, fields, ts)
 
             response = {
                 "keypoints": keypoints if keypoints else [],
