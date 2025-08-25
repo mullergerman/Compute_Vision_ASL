@@ -3,6 +3,8 @@ import numpy as np
 import json
 import time
 import os
+import urllib.request
+import urllib.parse
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -12,7 +14,6 @@ from flask import Flask
 from flask_sock import Sock
 import mediapipe as mp
 import pickle
-import metrics
 
 app = Flask(__name__)
 sock = Sock(app)
@@ -34,6 +35,36 @@ DEFAULT_TOPOLOGY = [
     for c in mp_hands.HAND_CONNECTIONS
 ]
 
+# Simple metrics function
+def send_metrics(measurement, tags=None, fields=None):
+    """Send metrics directly to Telegraf - ultra simple version"""
+    if not fields:
+        return
+    
+    try:
+        data = {
+            'measurement': measurement,
+            'ts': int(time.time() * 1000)  # timestamp in milliseconds
+        }
+        
+        # Add tags and fields
+        if tags:
+            data.update(tags)
+        if fields:
+            data.update(fields)
+        
+        # Send to Telegraf HTTP endpoint
+        req = urllib.request.Request(
+            'http://localhost:8088/ingest',
+            data=json.dumps(data).encode('utf-8'),
+            headers={'Content-Type': 'application/json'}
+        )
+        
+        urllib.request.urlopen(req, timeout=1)
+        #print(f"✅ Metrics sent: {measurement}")
+        
+    except Exception as e:
+        print(f"❌ Metrics failed: {e}")
 
 # Load ASL classification model with better error handling
 def load_model():
@@ -51,7 +82,6 @@ def load_model():
     
 # Load ASL classification model with better error handling
 asl_model = load_model()
-
 
 def _extract_features(hand_landmarks):
     """Return a flat array of landmark coordinates."""
@@ -91,15 +121,13 @@ def process_video(ws):
             
             # Process MediaPipe Hands Detection
             start_mediapipe = time.perf_counter()
-            duration_mp_ms = 0
-
             results = hands.process(image_rgb)
             end_mediapipe = time.perf_counter()
             duration_mp_ms = (end_mediapipe - start_mediapipe) * 1000
 
             keypoints = []
             topology = []
-            letter = []
+            letter = ""
             duration_asl_ms = 0
 
             if results.multi_hand_landmarks:
@@ -121,12 +149,15 @@ def process_video(ws):
                     end_asl = time.perf_counter()
                     duration_asl_ms = (end_asl - start_asl) * 1000
 
-            ts = time.time_ns()
-            fields = {
-                "duration_asl_ms": duration_asl_ms,
-                "duration_mp_ms": duration_mp_ms
-            }
-            metrics.record_metric("backend", {"endpoint": "ws"}, fields, ts)
+            # Send metrics - SIMPLE!
+            send_metrics(
+                measurement="asl_processing",
+                tags={"endpoint": "ws", "service": "asl-backend"},
+                fields={
+                    "duration_asl_ms": duration_asl_ms,
+                    "duration_mp_ms": duration_mp_ms
+                }
+            )
 
             response = {
                 "keypoints": keypoints if keypoints else [],
@@ -142,4 +173,5 @@ def process_video(ws):
             continue
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    print("🚀 Starting ASL Backend with simplified metrics...")
+    app.run(host="0.0.0.0", port=5000, debug=True)
