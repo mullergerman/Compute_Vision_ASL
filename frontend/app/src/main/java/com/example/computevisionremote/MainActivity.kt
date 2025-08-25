@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.graphics.*
 import android.os.*
 import android.view.SurfaceView
+import android.view.Surface
 import android.content.res.Configuration
 import android.widget.Toast
 import android.widget.TextView
@@ -181,7 +182,11 @@ class MainActivity : AppCompatActivity() {
 
         val rotation = previewView.display.rotation
 
-        val target = Size(640, 480)
+        val target = if (rotation == Surface.ROTATION_90 || rotation == Surface.ROTATION_270) {
+            Size(480, 640)
+        } else {
+            Size(640, 480)
+        }
         this.target = target
 
         val preview = Preview.Builder()
@@ -280,6 +285,7 @@ class MainActivity : AppCompatActivity() {
             val bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
             val matrix = Matrix().apply { postRotate(rotation) }
             val rotatedBitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+            this.target = Size(rotatedBitmap.width, rotatedBitmap.height)
             jpegOutputStream.reset()
             rotatedBitmap.compress(Bitmap.CompressFormat.JPEG, 80, jpegOutputStream)
             imageBytes = jpegOutputStream.toByteArray()
@@ -478,8 +484,13 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Leer dimensiones de la imagen original procesada
-        val imageWidth = target.width
-        val imageHeight = target.height
+        var imageWidth = target.width
+        var imageHeight = target.height
+        if (json.has("image_width") && json.has("image_height")) {
+            imageWidth = json.optInt("image_width", imageWidth)
+            imageHeight = json.optInt("image_height", imageHeight)
+            this.target = Size(imageWidth, imageHeight)
+        }
 
         // Calcular escala respetando la relación de aspecto del PreviewView
         val viewWidth = overlay.width.toFloat()
