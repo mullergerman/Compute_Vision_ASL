@@ -12,6 +12,7 @@ import android.widget.Button
 import android.net.ConnectivityManager
 import android.net.Network
 import android.util.Log
+import android.util.Size
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
@@ -55,6 +56,8 @@ class MainActivity : AppCompatActivity() {
 
     private var cameraProvider: ProcessCameraProvider? = null
     private var lensFacing: Int = CameraSelector.LENS_FACING_FRONT
+
+    private lateinit var target: Size
 
     private val jpegOutputStream = ByteArrayOutputStream()
 
@@ -178,13 +181,18 @@ class MainActivity : AppCompatActivity() {
 
         val rotation = previewView.display.rotation
 
+        val target = Size(640, 480)
+        this.target = target
+
         val preview = Preview.Builder()
+            .setTargetResolution(target)
             .setTargetRotation(rotation)
             .build().also {
                 it.setSurfaceProvider(previewView.surfaceProvider)
             }
 
         val imageAnalysis = ImageAnalysis.Builder()
+            .setTargetResolution(target)
             .setTargetRotation(rotation)
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .build()
@@ -470,8 +478,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Leer dimensiones de la imagen original procesada
-        val imageWidth = json.optInt("image_width", overlay.width)
-        val imageHeight = json.optInt("image_height", overlay.height)
+        val imageWidth = target.width
+        val imageHeight = target.height
 
         // Calcular escala respetando la relación de aspecto del PreviewView
         val viewWidth = overlay.width.toFloat()
