@@ -25,10 +25,8 @@ import java.net.URI
 import java.util.ArrayDeque
 import androidx.appcompat.app.AppCompatActivity
 import org.json.JSONArray
+
 import java.util.concurrent.atomic.AtomicBoolean
-import java.net.HttpURLConnection
-import java.net.URL
-import java.util.concurrent.Executors
 
 
 class MainActivity : AppCompatActivity() {
@@ -59,10 +57,6 @@ class MainActivity : AppCompatActivity() {
     private val jpegOutputStream = ByteArrayOutputStream()
 
     private val CAMERA_PERMISSION_REQUEST_CODE = 101
-
-    // HTTP executor for sending metrics
-    private val httpExecutor = Executors.newSingleThreadExecutor()
-    private val telegrafUrl = "http://glmuller.ddns.net:8088/ingest"
 
     companion object {
         private const val TAG = "MainActivity"
@@ -246,47 +240,6 @@ class MainActivity : AppCompatActivity() {
         waitingForResponse.set(true)
     }
 
-    private fun sendDelayToInfluxDB(delay: Long, fps: Float) {
-        httpExecutor.execute {
-            try {
-                val url = URL(telegrafUrl)
-                val connection = url.openConnection() as HttpURLConnection
-                
-                connection.requestMethod = "POST"
-                connection.setRequestProperty("Content-Type", "application/json")
-                connection.setRequestProperty("Accept", "application/json")
-                connection.doOutput = true
-                
-                val jsonData = JSONObject().apply {
-                    put("measurement", "frontend_delay")
-                    put("ts", System.currentTimeMillis())
-                    put("fe", "frontend")  // frontend tag as requested
-                    put("delay_ms", delay)
-                    put("fps", fps)
-                    put("session", "android_session")
-                    put("device", Build.MODEL)
-                    put("app_ver", "1.0")
-                }
-                
-                connection.outputStream.use { os ->
-                    os.write(jsonData.toString().toByteArray())
-                    os.flush()
-                }
-                
-                val responseCode = connection.responseCode
-                if (responseCode == HttpURLConnection.HTTP_OK) {
-                    Log.d(TAG, "Successfully sent delay metrics to InfluxDB: ${delay}ms, ${fps}fps")
-                } else {
-                    Log.w(TAG, "Failed to send delay metrics, response code: $responseCode")
-                }
-                
-                connection.disconnect()
-            } catch (e: Exception) {
-                Log.e(TAG, "Error sending delay metrics to InfluxDB", e)
-            }
-        }
-    }
-
     private fun connectSocket() {
         if (isSocketConnected) {
             Toast.makeText(this, "Socket already connected", Toast.LENGTH_SHORT).show()
@@ -343,10 +296,6 @@ class MainActivity : AppCompatActivity() {
                         drawOverlay(json)
                     }
                 }
-                
-                // Send delay metrics to InfluxDB
-                sendDelayToInfluxDB(delay, fps)
-                
                 waitingForResponse.set(false)
             }
 
@@ -400,7 +349,6 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
         networkCallback?.let { connectivityManager.unregisterNetworkCallback(it) }
         disconnectSocket(true)
-        httpExecutor.shutdown()
     }
 
     private fun drawOverlay(json: JSONObject) {
