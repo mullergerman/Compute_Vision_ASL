@@ -31,6 +31,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
+import kotlin.system.measureTimeMillis
 
 
 class MainActivity : AppCompatActivity() {
@@ -244,62 +245,65 @@ class MainActivity : AppCompatActivity() {
         val nv21 = ByteArray(expectedSize)
         var offset = 0
 
-        // ----- Copy Y plane row by row -----
-        val yBuffer = yPlane.buffer
-        val yRowStride = yPlane.rowStride
-        val yPixelStride = yPlane.pixelStride
-        if (yPixelStride == 1) {
-            for (row in 0 until height) {
-                val yPos = row * yRowStride
-                yBuffer.position(yPos)
-                yBuffer.get(nv21, offset, width)
-                offset += width
+        val yuvTime = measureTimeMillis {
+            // ----- Copy Y plane row by row -----
+            val yBuffer = yPlane.buffer
+            val yRowStride = yPlane.rowStride
+            val yPixelStride = yPlane.pixelStride
+            if (yPixelStride == 1) {
+                for (row in 0 until height) {
+                    val yPos = row * yRowStride
+                    yBuffer.position(yPos)
+                    yBuffer.get(nv21, offset, width)
+                    offset += width
+                }
+            } else {
+                for (row in 0 until height) {
+                    var yPos = row * yRowStride
+                    for (col in 0 until width) {
+                        nv21[offset++] = yBuffer.get(yPos)
+                        yPos += yPixelStride
+                    }
+                }
             }
-        } else {
-            for (row in 0 until height) {
-                var yPos = row * yRowStride
-                for (col in 0 until width) {
-                    nv21[offset++] = yBuffer.get(yPos)
-                    yPos += yPixelStride
+
+            // ----- Copy and interleave V and U planes (NV21) -----
+            val uBuffer = uPlane.buffer
+            val vBuffer = vPlane.buffer
+            val uRowStride = uPlane.rowStride
+            val vRowStride = vPlane.rowStride
+            val uvPixelStride = uPlane.pixelStride  // same as vPlane.pixelStride
+
+            if (uvPixelStride == 1) {
+                val rowSize = width / 2
+                val vRow = ByteArray(rowSize)
+                val uRow = ByteArray(rowSize)
+                for (row in 0 until height / 2) {
+                    vBuffer.position(row * vRowStride)
+                    vBuffer.get(vRow, 0, rowSize)
+                    uBuffer.position(row * uRowStride)
+                    uBuffer.get(uRow, 0, rowSize)
+                    var col = 0
+                    while (col < rowSize) {
+                        nv21[offset++] = vRow[col]
+                        nv21[offset++] = uRow[col]
+                        col++
+                    }
+                }
+            } else {
+                for (row in 0 until height / 2) {
+                    var uPos = row * uRowStride
+                    var vPos = row * vRowStride
+                    for (col in 0 until width / 2) {
+                        nv21[offset++] = vBuffer.get(vPos)
+                        nv21[offset++] = uBuffer.get(uPos)
+                        vPos += uvPixelStride
+                        uPos += uvPixelStride
+                    }
                 }
             }
         }
-
-        // ----- Copy and interleave V and U planes (NV21) -----
-        val uBuffer = uPlane.buffer
-        val vBuffer = vPlane.buffer
-        val uRowStride = uPlane.rowStride
-        val vRowStride = vPlane.rowStride
-        val uvPixelStride = uPlane.pixelStride  // same as vPlane.pixelStride
-
-        if (uvPixelStride == 1) {
-            val rowSize = width / 2
-            val vRow = ByteArray(rowSize)
-            val uRow = ByteArray(rowSize)
-            for (row in 0 until height / 2) {
-                vBuffer.position(row * vRowStride)
-                vBuffer.get(vRow, 0, rowSize)
-                uBuffer.position(row * uRowStride)
-                uBuffer.get(uRow, 0, rowSize)
-                var col = 0
-                while (col < rowSize) {
-                    nv21[offset++] = vRow[col]
-                    nv21[offset++] = uRow[col]
-                    col++
-                }
-            }
-        } else {
-            for (row in 0 until height / 2) {
-                var uPos = row * uRowStride
-                var vPos = row * vRowStride
-                for (col in 0 until width / 2) {
-                    nv21[offset++] = vBuffer.get(vPos)
-                    nv21[offset++] = uBuffer.get(uPos)
-                    vPos += uvPixelStride
-                    uPos += uvPixelStride
-                }
-            }
-        }
+        Log.d(TAG, "faseYuv took $yuvTime ms")
 
         // Ensure the array is the expected size before creating YuvImage
         if (offset != expectedSize) {
@@ -307,25 +311,31 @@ class MainActivity : AppCompatActivity() {
             return ByteArray(0)
         }
 
-        val yuvImage = YuvImage(nv21, ImageFormat.NV21, width, height, null)
-        jpegOutputStream.reset()
-        yuvImage.compressToJpeg(Rect(0, 0, width, height), 80, jpegOutputStream)
-        var imageBytes = jpegOutputStream.toByteArray()
-
+        var imageBytes: ByteArray
+        val jpegTime = measureTimeMillis {
+            val yuvImage = YuvImage(nv21, ImageFormat.NV21, width, height, null)
+            jpegOutputStream.reset()
+            yuvImage.compressToJpeg(Rect(0, 0, width, height), 80, jpegOutputStream)
+            imageBytes = jpegOutputStream.toByteArray()
+        }
+        Log.d(TAG, "faseJpeg took $jpegTime ms")
         Log.d(TAG, "YUV to JPEG compression completed - bytes: ${imageBytes.size}")
 
         val rotation = image.imageInfo.rotationDegrees.toFloat()
         if (rotation != 0f) {
-            Log.d(TAG, "Applying rotation: ${rotation} degrees")
-            val bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
-            val matrix = Matrix().apply { postRotate(rotation) }
-            val rotatedBitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
-            this.target = Size(rotatedBitmap.width, rotatedBitmap.height)
-            jpegOutputStream.reset()
-            rotatedBitmap.compress(Bitmap.CompressFormat.JPEG, 80, jpegOutputStream)
-            imageBytes = jpegOutputStream.toByteArray()
-            bitmap.recycle()
-            rotatedBitmap.recycle()
+            val rotationTime = measureTimeMillis {
+                Log.d(TAG, "Applying rotation: ${rotation} degrees")
+                val bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+                val matrix = Matrix().apply { postRotate(rotation) }
+                val rotatedBitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+                this.target = Size(rotatedBitmap.width, rotatedBitmap.height)
+                jpegOutputStream.reset()
+                rotatedBitmap.compress(Bitmap.CompressFormat.JPEG, 80, jpegOutputStream)
+                imageBytes = jpegOutputStream.toByteArray()
+                bitmap.recycle()
+                rotatedBitmap.recycle()
+            }
+            Log.d(TAG, "faseRotacion took $rotationTime ms")
         }
 
         Log.d(TAG, "JPEG conversion completed - final bytes: ${imageBytes.size}")
