@@ -61,6 +61,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var target: Size
 
     private val jpegOutputStream = ByteArrayOutputStream()
+    private lateinit var nv21Buffer: ByteArray
 
     private val CAMERA_PERMISSION_REQUEST_CODE = 101
 
@@ -189,6 +190,7 @@ class MainActivity : AppCompatActivity() {
             Size(640, 480)
         }
         this.target = target
+        nv21Buffer = ByteArray(target.width * target.height * 3 / 2)
 
         val preview = Preview.Builder()
             .setTargetResolution(target)
@@ -234,7 +236,7 @@ class MainActivity : AppCompatActivity() {
         val vPlane = image.planes[2]
 
         val expectedSize = width * height * 3 / 2
-        val nv21 = ByteArray(expectedSize)
+        val nv21 = nv21Buffer
         var offset = 0
 
         // ----- Copy Y plane row by row -----
