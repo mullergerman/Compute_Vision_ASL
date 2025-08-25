@@ -12,3 +12,4 @@ metrics-stack-podman/graphite/data/
 metrics-stack-podman/nginx/nginx.conf
 metrics-stack-podman/influxdb/data
 metrics-stack-podman/influxdb/config
+debug_images/
