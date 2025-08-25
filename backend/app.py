@@ -1,11 +1,13 @@
 import cv2
 import numpy as np
 import json
+import time
 
 from flask import Flask
 from flask_sock import Sock
 import mediapipe as mp
 import pickle
+import metrics
 
 app = Flask(__name__)
 sock = Sock(app)
@@ -88,7 +90,7 @@ def process_video(ws):
             keypoints = []
             topology = []
             letter = []
-            asl_processing_time = 0
+            duration_ms = 0
 
             if results.multi_hand_landmarks:
                 for idx, hand_landmarks in enumerate(results.multi_hand_landmarks):
@@ -104,8 +106,19 @@ def process_video(ws):
                         topology.append([start + base, end + base])
 
                     # Medir tiempo de predicción ASL
+                    start = time.perf_counter()
                     letter = predict_letter(hand_landmarks)
+                    end = time.perf_counter()
+                    duration_ms = (end - start) * 1000
 
+            ts = time.time_ns()
+            fields = {
+                "duration_ms": duration_ms,
+                "image_width": frame.shape[1],
+                "image_height": frame.shape[0],
+                "num_keypoints": len(keypoints),
+            }
+            metrics.record_metric("asl_processing", {"endpoint": "ws"}, fields, ts)
 
             response = {
                 "keypoints": keypoints if keypoints else [],
