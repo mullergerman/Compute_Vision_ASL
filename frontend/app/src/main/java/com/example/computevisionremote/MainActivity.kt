@@ -405,6 +405,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun drawOverlay(json: JSONObject) {
         val canvas = overlay.holder.lockCanvas()
+        if (canvas == null) {
+            Log.w("MainActivity", "Canvas is null, skipping overlay drawing")
+            return
+        }
         canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
 
         val paint = Paint().apply {
@@ -476,6 +480,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        overlay.holder.unlockCanvasAndPost(canvas)
+        canvas?.let { overlay.holder.unlockCanvasAndPost(it) }
     }
 }
