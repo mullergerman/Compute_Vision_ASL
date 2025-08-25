@@ -118,10 +118,7 @@ def process_video(ws):
 
             ts = time.time_ns()
             fields = {
-                "duration_ms": duration_ms,
-                "image_width": frame.shape[1],
-                "image_height": frame.shape[0],
-                "num_keypoints": len(keypoints),
+                "duration_ms": duration_ms
             }
             metrics.record_metric("asl_processing", {"endpoint": "ws"}, fields, ts)
 

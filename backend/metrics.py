@@ -119,6 +119,7 @@ class TelegrafClient:
                     self._session.post(
                         self.url, data=data, headers=headers, timeout=5, verify=False
                     )
+                    print(data)
                     break
                 except requests.RequestException:
                     if attempt == 2:
