@@ -89,13 +89,18 @@ def process_video(ws):
             # Convert to RGB
             image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             
-            # Process with warnings suppressed
+            # Process MediaPipe Hands Detection
+            start_mediapipe = time.perf_counter()
+            duration_mp_ms = 0
+
             results = hands.process(image_rgb)
+            end_mediapipe = time.perf_counter()
+            duration_mp_ms = (end_mediapipe - start_mediapipe) * 1000
 
             keypoints = []
             topology = []
             letter = []
-            duration_ms = 0
+            duration_asl_ms = 0
 
             if results.multi_hand_landmarks:
                 for idx, hand_landmarks in enumerate(results.multi_hand_landmarks):
@@ -111,16 +116,17 @@ def process_video(ws):
                         topology.append([start + base, end + base])
 
                     # Medir tiempo de predicción ASL
-                    start = time.perf_counter()
+                    start_asl = time.perf_counter()
                     letter = predict_letter(hand_landmarks)
-                    end = time.perf_counter()
-                    duration_ms = (end - start) * 1000
+                    end_asl = time.perf_counter()
+                    duration_asl_ms = (end_asl - start_asl) * 1000
 
             ts = time.time_ns()
             fields = {
-                "duration_ms": duration_ms
+                "duration_asl_ms": duration_asl_ms,
+                "duration_mp_ms": duration_mp_ms
             }
-            metrics.record_metric("asl_processing", {"endpoint": "ws"}, fields, ts)
+            metrics.record_metric("backend", {}, fields, ts)
 
             response = {
                 "keypoints": keypoints if keypoints else [],
