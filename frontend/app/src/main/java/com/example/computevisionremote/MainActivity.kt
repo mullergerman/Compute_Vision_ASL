@@ -56,6 +56,7 @@ class MainActivity : AppCompatActivity() {
     private val sendTimes: ArrayDeque<Long> = ArrayDeque()
     private val waitingForResponse = AtomicBoolean(false)
     private var lastFrameTime: Long = 0
+    private var lastFrameSentTime: Long = 0
 
     private var cameraProvider: ProcessCameraProvider? = null
     private var lensFacing: Int = CameraSelector.LENS_FACING_FRONT
@@ -194,9 +195,9 @@ class MainActivity : AppCompatActivity() {
         this.target = previewResolution
 
         val analysisResolution = if (rotation == Surface.ROTATION_90 || rotation == Surface.ROTATION_270) {
-            Size(240, 320)
+            Size(240, 320)  // Force smaller resolution
         } else {
-            Size(320, 240)
+            Size(320, 240)  // Force smaller resolution
         }
 
         val preview = Preview.Builder()
@@ -213,11 +214,17 @@ class MainActivity : AppCompatActivity() {
             .build()
 
         imageAnalysis.setAnalyzer(ContextCompat.getMainExecutor(this)) { imageProxy ->
+            // Check if we're waiting for response with timeout
             if (waitingForResponse.get()) {
-            Log.d("MainActivity", "Image analysis started - waitingForResponse: ${waitingForResponse.get()}")
-                imageProxy.close()
-                Log.d("MainActivity", "Skipping frame - waiting for response")
-                return@setAnalyzer
+                val currentTime = System.currentTimeMillis()
+                if (currentTime - lastFrameSentTime < 500) { // 500ms timeout
+                    Log.d(TAG, "Skipping frame - waiting for response")
+                    imageProxy.close()
+                    return@setAnalyzer
+                } else {
+                    Log.w(TAG, "Response timeout, continuing with next frame")
+                    waitingForResponse.set(false)
+                }
             }
 
             val yuvData = imageProxyToYuvWithMetadata(imageProxy)
@@ -247,60 +254,95 @@ class MainActivity : AppCompatActivity() {
         val nv21 = ByteArray(expectedSize)
         var offset = 0
 
+        // Log buffer characteristics for debugging
+        Log.d(TAG, "Y plane: stride=${yPlane.rowStride}, pixelStride=${yPlane.pixelStride}, buffer size=${yPlane.buffer.remaining()}")
+        Log.d(TAG, "U plane: stride=${uPlane.rowStride}, pixelStride=${uPlane.pixelStride}, buffer size=${uPlane.buffer.remaining()}")
+        Log.d(TAG, "V plane: stride=${vPlane.rowStride}, pixelStride=${vPlane.pixelStride}, buffer size=${vPlane.buffer.remaining()}")
+        
         val yuvTime = measureTimeMillis {
-            // ----- Copy Y plane row by row -----
+            // ----- Copy Y plane (optimized) -----
             val yBuffer = yPlane.buffer
             val yRowStride = yPlane.rowStride
             val yPixelStride = yPlane.pixelStride
-            if (yPixelStride == 1) {
-                for (row in 0 until height) {
-                    val yPos = row * yRowStride
-                    yBuffer.position(yPos)
-                    yBuffer.get(nv21, offset, width)
-                    offset += width
-                }
-            } else {
-                for (row in 0 until height) {
-                    var yPos = row * yRowStride
-                    for (col in 0 until width) {
-                        nv21[offset++] = yBuffer.get(yPos)
-                        yPos += yPixelStride
+            
+            val yTime = measureTimeMillis {
+                if (yPixelStride == 1 && yRowStride == width) {
+                    // Optimal case: contiguous data, copy entire buffer at once
+                    Log.d(TAG, "Using optimal Y plane copy (contiguous)")
+                    yBuffer.position(0)
+                    yBuffer.get(nv21, 0, width * height)
+                    offset = width * height
+                } else if (yPixelStride == 1) {
+                    // Copy row by row (padding in stride)
+                    Log.d(TAG, "Using row-by-row Y plane copy (stride=$yRowStride, width=$width)")
+                    for (row in 0 until height) {
+                        yBuffer.position(row * yRowStride)
+                        yBuffer.get(nv21, offset, width)
+                        offset += width
+                    }
+                } else {
+                    // Worst case: pixel stride > 1, copy pixel by pixel
+                    Log.d(TAG, "Using pixel-by-pixel Y plane copy (pixelStride=$yPixelStride) - SLOW!")
+                    val rowData = ByteArray(yRowStride)
+                    for (row in 0 until height) {
+                        yBuffer.position(row * yRowStride)
+                        yBuffer.get(rowData, 0, minOf(yRowStride, yBuffer.remaining()))
+                        for (col in 0 until width) {
+                            nv21[offset++] = rowData[col * yPixelStride]
+                        }
                     }
                 }
             }
+            Log.d(TAG, "Y plane extraction took $yTime ms")
 
-            // ----- Copy and interleave V and U planes (NV21) -----
+            // ----- Copy UV planes (optimized) -----
             val uBuffer = uPlane.buffer
             val vBuffer = vPlane.buffer
             val uRowStride = uPlane.rowStride
             val vRowStride = vPlane.rowStride
-            val uvPixelStride = uPlane.pixelStride  // same as vPlane.pixelStride
+            val uvPixelStride = uPlane.pixelStride
+            val uvHeight = height / 2
+            val uvWidth = width / 2
 
-            if (uvPixelStride == 1) {
-                val rowSize = width / 2
-                val vRow = ByteArray(rowSize)
-                val uRow = ByteArray(rowSize)
-                for (row in 0 until height / 2) {
+            if (uvPixelStride == 1 && uRowStride == uvWidth && vRowStride == uvWidth) {
+                // Optimal case: read entire UV planes and interleave
+                val uData = ByteArray(uvWidth * uvHeight)
+                val vData = ByteArray(uvWidth * uvHeight)
+                uBuffer.position(0)
+                vBuffer.position(0)
+                uBuffer.get(uData)
+                vBuffer.get(vData)
+                
+                for (i in 0 until uvWidth * uvHeight) {
+                    nv21[offset++] = vData[i]
+                    nv21[offset++] = uData[i]
+                }
+            } else if (uvPixelStride == 1) {
+                // Copy row by row and interleave
+                val vRow = ByteArray(uvWidth)
+                val uRow = ByteArray(uvWidth)
+                for (row in 0 until uvHeight) {
                     vBuffer.position(row * vRowStride)
-                    vBuffer.get(vRow, 0, rowSize)
                     uBuffer.position(row * uRowStride)
-                    uBuffer.get(uRow, 0, rowSize)
-                    var col = 0
-                    while (col < rowSize) {
+                    vBuffer.get(vRow, 0, minOf(uvWidth, vBuffer.remaining()))
+                    uBuffer.get(uRow, 0, minOf(uvWidth, uBuffer.remaining()))
+                    for (col in 0 until uvWidth) {
                         nv21[offset++] = vRow[col]
                         nv21[offset++] = uRow[col]
-                        col++
                     }
                 }
             } else {
-                for (row in 0 until height / 2) {
-                    var uPos = row * uRowStride
-                    var vPos = row * vRowStride
-                    for (col in 0 until width / 2) {
-                        nv21[offset++] = vBuffer.get(vPos)
-                        nv21[offset++] = uBuffer.get(uPos)
-                        vPos += uvPixelStride
-                        uPos += uvPixelStride
+                // Worst case: pixel stride > 1
+                val uRowData = ByteArray(uRowStride)
+                val vRowData = ByteArray(vRowStride)
+                for (row in 0 until uvHeight) {
+                    uBuffer.position(row * uRowStride)
+                    vBuffer.position(row * vRowStride)
+                    uBuffer.get(uRowData, 0, minOf(uRowStride, uBuffer.remaining()))
+                    vBuffer.get(vRowData, 0, minOf(vRowStride, vBuffer.remaining()))
+                    for (col in 0 until uvWidth) {
+                        nv21[offset++] = vRowData[col * uvPixelStride]
+                        nv21[offset++] = uRowData[col * uvPixelStride]
                     }
                 }
             }
@@ -509,7 +551,9 @@ class MainActivity : AppCompatActivity() {
         if (!isSocketConnected) return
         Log.d("MainActivity", "Sending frame to server - bytes: ${frameBytes.size}, socket connected: $isSocketConnected")
 
-        sendTimes.add(System.currentTimeMillis())
+        val currentTime = System.currentTimeMillis()
+        sendTimes.add(currentTime)
+        lastFrameSentTime = currentTime
         socket?.send(frameBytes)
         waitingForResponse.set(true)
         Log.d("MainActivity", "Frame sent successfully via WebSocket")

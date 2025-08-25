@@ -166,10 +166,37 @@ def yuv_to_rgb(yuv_data, width, height):
 
 @sock.route('/ws')
 def process_video(ws):
+    frame_count = 0
+    last_processed_time = 0
+    processing_interval = 0.1  # Process maximum 10 FPS
+    
     while True:
         data = ws.receive()
         if not data:
             break
+
+        frame_count += 1
+        current_time = time.time()
+        
+        # Drop frames if we're processing too fast
+        if (current_time - last_processed_time) < processing_interval:
+            print(f"Dropping frame {frame_count} - too fast")
+            # Send a quick ACK without processing
+            try:
+                response = {
+                    "keypoints": [],
+                    "topology": [],
+                    "image_width": 1440,
+                    "image_height": 1440,
+                    "letter": ""
+                }
+                ws.send(json.dumps(response))
+            except:
+                pass
+            continue
+            
+        last_processed_time = current_time
+        print(f"Processing frame {frame_count}")
 
         try:
             if isinstance(data, str):
