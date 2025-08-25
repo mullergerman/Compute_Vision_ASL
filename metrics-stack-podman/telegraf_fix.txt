@@ -1,0 +1,13 @@
+    - name: telegraf
+      image: docker.io/library/telegraf:1.30
+      command: ["/usr/bin/telegraf"]
+      args: ["--config-directory", "/etc/telegraf/telegraf.d"]
+      securityContext:
+        runAsUser: 999
+        runAsGroup: 999
+      ports:
+        - containerPort: 8088
+          protocol: TCP
+      volumeMounts:
+        - name: telegraf-conf
+          mountPath: /etc/telegraf/telegraf.d

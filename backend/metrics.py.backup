@@ -62,11 +62,7 @@ class TelegrafClient:
             .lower()
         )
 
-                # Support both HTTP (direct telegraf) and HTTPS (nginx proxy)
-        if os.getenv("TELEGRAF_USE_HTTPS", "false").lower() == "true":
-            self.url = f"https://{self.host}:8443/ingest"
-        else:
-            self.url = f"http://{self.host}:8088/ingest"
+        self.url = f"http://{self.host}:8088/ingest"
         self._session = requests.Session()
         self._queue: "queue.Queue[Metric]" = queue.Queue()
         self._stop = threading.Event()
@@ -111,13 +107,12 @@ class TelegrafClient:
                 headers = {"Content-Type": "text/plain"}
 
             if self.token:
-                if self.token:
-                    headers["Authorization"] = f"Bearer {self.token}"
+                headers["Authorization"] = f"Token {self.token}"
 
             for attempt in range(3):
                 try:
                     self._session.post(
-                        self.url, data=data, headers=headers, timeout=5, verify=False
+                        self.url, data=data, headers=headers, timeout=5
                     )
                     break
                 except requests.RequestException:
@@ -170,19 +165,9 @@ class TelegrafClient:
 
     def _metric_to_dict(self, metric: Metric) -> Dict[str, object]:
         name, tags, fields, ts = metric
-        # Flatten the format for Telegraf JSON ingestion
-        payload = {"measurement": name}
-        
-        # Add timestamp as 'ts' if provided
+        payload = {"measurement": name, "tags": tags, "fields": fields}
         if ts is not None:
-            payload["ts"] = ts
-            
-        # Add all tags directly to the payload
-        payload.update(tags)
-        
-        # Add all fields directly to the payload  
-        payload.update(fields)
-        
+            payload["timestamp"] = ts
         return payload
 
     def _metrics_to_json(self, metrics: Iterable[Metric]) -> bytes:

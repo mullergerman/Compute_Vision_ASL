@@ -2,6 +2,11 @@ import cv2
 import numpy as np
 import json
 import time
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 from flask import Flask
 from flask_sock import Sock

@@ -9,7 +9,7 @@ metadata:
 spec:
   containers:
     - name: influxdb
-      image: docker.io/library/influxdb:2.7
+      image: influxdb:2.x
       ports:
         - containerPort: 8086
           hostPort: 8086
@@ -34,7 +34,7 @@ spec:
           mountPath: /etc/influxdb2
 
     - name: grafana
-      image: docker.io/grafana/grafana:10.4.5
+      image: grafana/grafana:10.4.5
       env:
         - name: GF_SECURITY_ADMIN_USER
           value: "admin"
@@ -54,11 +54,7 @@ spec:
 
     - name: telegraf
       image: docker.io/library/telegraf:1.30
-      command: ["/usr/bin/telegraf"]
       args: ["--config-directory", "/etc/telegraf/telegraf.d"]
-      securityContext:
-        runAsUser: 999
-        runAsGroup: 999
       ports:
         - containerPort: 8088
           protocol: TCP
