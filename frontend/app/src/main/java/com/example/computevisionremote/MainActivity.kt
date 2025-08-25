@@ -76,6 +76,14 @@ class MainActivity : AppCompatActivity() {
     // HTTP executor for sending metrics
     private val httpExecutor = Executors.newSingleThreadExecutor()
     private val telegrafUrl = "http://glmuller.ddns.net:8088/ingest"
+    
+    // Circuit breaker for InfluxDB
+    private var influxFailureCount = 0
+    private var lastInfluxAttempt = 0L
+    private val maxInfluxFailures = 5
+    private val influxRetryDelay = 30000L // 30 seconds
+    private var lastMetricSent = 0L
+    private val metricSendInterval = 1000L // Send metrics max once per second
 
     companion object {
         private const val TAG = "MainActivity"
@@ -258,8 +266,8 @@ class MainActivity : AppCompatActivity() {
         val originalWidth = image.width
         val originalHeight = image.height
         
-        // Force downsampling to max 160x160 for much faster processing
-        val targetSize = 160
+        // Force downsampling to 100x100 for ultra-fast processing
+        val targetSize = 100
         val scale = minOf(targetSize.toFloat() / originalWidth, targetSize.toFloat() / originalHeight)
         val width = (originalWidth * scale).toInt()
         val height = (originalHeight * scale).toInt()
@@ -549,10 +557,28 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun sendDelayToInfluxDB(delay: Long, fps: Float) {
+        // Circuit breaker: skip if too many recent failures
+        val currentTime = System.currentTimeMillis()
+        if (influxFailureCount >= maxInfluxFailures) {
+            if (currentTime - lastInfluxAttempt < influxRetryDelay) {
+                return // Skip sending, still in cooldown
+            } else {
+                // Reset after cooldown period
+                influxFailureCount = 0
+                Log.i(TAG, "InfluxDB circuit breaker reset, retrying")
+            }
+        }
+        
+        lastInfluxAttempt = currentTime
+        
         httpExecutor.execute {
             try {
                 val url = URL(telegrafUrl)
                 val connection = url.openConnection() as HttpURLConnection
+                
+                // Set timeouts to prevent hanging
+                connection.connectTimeout = 3000 // 3 seconds
+                connection.readTimeout = 3000    // 3 seconds
                 
                 connection.requestMethod = "POST"
                 connection.setRequestProperty("Content-Type", "application/json")
@@ -577,14 +603,17 @@ class MainActivity : AppCompatActivity() {
                 
                 val responseCode = connection.responseCode
                 if (responseCode == HttpURLConnection.HTTP_OK) {
+                    influxFailureCount = 0 // Reset failure count on success
                     Log.d(TAG, "Successfully sent delay metrics to InfluxDB: ${delay}ms, ${fps}fps")
                 } else {
-                    Log.w(TAG, "Failed to send delay metrics, response code: $responseCode")
+                    influxFailureCount++
+                    Log.w(TAG, "Failed to send delay metrics, response code: $responseCode (failures: $influxFailureCount)")
                 }
                 
                 connection.disconnect()
             } catch (e: Exception) {
-                Log.e(TAG, "Error sending delay metrics to InfluxDB", e)
+                influxFailureCount++
+                Log.e(TAG, "Error sending delay metrics to InfluxDB (failures: $influxFailureCount)", e)
             }
         }
     }
@@ -647,8 +676,12 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
                 
-                // Send delay metrics to InfluxDB
-                sendDelayToInfluxDB(delay, fps)
+                // Send delay metrics to InfluxDB (with throttling)
+                val currentTime = System.currentTimeMillis()
+                if (currentTime - lastMetricSent > metricSendInterval) {
+                    sendDelayToInfluxDB(delay, fps)
+                    lastMetricSent = currentTime
+                }
                 
                 waitingForResponse.set(false)
             }
