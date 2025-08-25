@@ -77,6 +77,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         previewView = findViewById(R.id.previewView)
+        previewView.scaleType = PreviewView.ScaleType.FILL_CENTER
         overlay = findViewById(R.id.overlay)
         delayTextView = findViewById(R.id.delayTextView)
         fpsTextView = findViewById(R.id.fpsTextView)
@@ -498,7 +499,12 @@ class MainActivity : AppCompatActivity() {
 
         val scaleX = viewWidth / imageWidth.toFloat()
         val scaleY = viewHeight / imageHeight.toFloat()
-        val scale = maxOf(scaleX, scaleY)
+        val scale = when (previewView.scaleType) {
+            PreviewView.ScaleType.FIT_START,
+            PreviewView.ScaleType.FIT_CENTER,
+            PreviewView.ScaleType.FIT_END -> minOf(scaleX, scaleY)
+            else -> maxOf(scaleX, scaleY)
+        }
 
         // Desplazamiento para centrar (mismo comportamiento que PreviewView)
         val offsetX = (viewWidth - imageWidth * scale) / 2f
