@@ -184,22 +184,28 @@ class MainActivity : AppCompatActivity() {
 
         val rotation = previewView.display.rotation
 
-        val target = if (rotation == Surface.ROTATION_90 || rotation == Surface.ROTATION_270) {
+        val previewResolution = if (rotation == Surface.ROTATION_90 || rotation == Surface.ROTATION_270) {
             Size(480, 640)
         } else {
             Size(640, 480)
         }
-        this.target = target
+        this.target = previewResolution
+
+        val analysisResolution = if (rotation == Surface.ROTATION_90 || rotation == Surface.ROTATION_270) {
+            Size(240, 320)
+        } else {
+            Size(320, 240)
+        }
 
         val preview = Preview.Builder()
-            .setTargetResolution(target)
+            .setTargetResolution(previewResolution)
             .setTargetRotation(rotation)
             .build().also {
                 it.setSurfaceProvider(previewView.surfaceProvider)
             }
 
         val imageAnalysis = ImageAnalysis.Builder()
-            .setTargetResolution(target)
+            .setTargetResolution(analysisResolution)
             .setTargetRotation(rotation)
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .build()
