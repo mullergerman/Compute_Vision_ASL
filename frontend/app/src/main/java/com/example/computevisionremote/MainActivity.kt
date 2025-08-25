@@ -258,7 +258,7 @@ class MainActivity : AppCompatActivity() {
                 connection.doOutput = true
                 
                 val jsonData = JSONObject().apply {
-                    put("measurement", "frontend_delay")
+                    put("measurement", "frontend")
                     put("ts", System.currentTimeMillis())
                     put("fe", "frontend")  // frontend tag as requested
                     put("delay_ms", delay)
