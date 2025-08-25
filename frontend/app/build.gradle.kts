@@ -67,4 +67,5 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:1.3.1")
     // If you're using CameraView for previews
     implementation("androidx.camera:camera-view:1.3.1")
+    implementation("androidx.renderscript:renderscript-toolkit:1.0.0")
 }

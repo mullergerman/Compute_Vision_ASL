@@ -61,6 +61,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var target: Size
 
     private val jpegOutputStream = ByteArrayOutputStream()
+    private val yuvToRgbConverter by lazy { YuvToRgbConverter(this) }
+    private var bitmapBuffer: Bitmap? = null
+    private var rotatedBitmap: Bitmap? = null
 
     private val CAMERA_PERMISSION_REQUEST_CODE = 101
 
@@ -225,73 +228,40 @@ class MainActivity : AppCompatActivity() {
     private fun imageProxyToBitmap(image: ImageProxy): ByteArray {
         Log.d(TAG, "Converting ImageProxy to JPEG - size: ${image.width}x${image.height}, format: ${image.format}")
 
-        val width = image.width
-        val height = image.height
+        val mediaImage = image.image ?: return ByteArray(0)
 
-        // Y, U and V planes
-        val yPlane = image.planes[0]
-        val uPlane = image.planes[1]
-        val vPlane = image.planes[2]
+        if (bitmapBuffer == null || bitmapBuffer!!.width != image.width || bitmapBuffer!!.height != image.height) {
+            bitmapBuffer = Bitmap.createBitmap(image.width, image.height, Bitmap.Config.ARGB_8888)
+        }
+        val bitmap = bitmapBuffer!!
 
-        val expectedSize = width * height * 3 / 2
-        val nv21 = ByteArray(expectedSize)
-        var offset = 0
+        yuvToRgbConverter.yuvToRgb(mediaImage, bitmap)
 
-        // ----- Copy Y plane row by row -----
-        val yBuffer = yPlane.buffer
-        val yRowStride = yPlane.rowStride
-        val yPixelStride = yPlane.pixelStride
-        for (row in 0 until height) {
-            var yPos = row * yRowStride
-            for (col in 0 until width) {
-                nv21[offset++] = yBuffer.get(yPos)
-                yPos += yPixelStride
+        val rotation = image.imageInfo.rotationDegrees
+        val finalBitmap = if (rotation != 0) {
+            if (rotatedBitmap == null || rotatedBitmap!!.width != image.height || rotatedBitmap!!.height != image.width) {
+                rotatedBitmap = Bitmap.createBitmap(image.height, image.width, Bitmap.Config.ARGB_8888)
             }
-        }
-
-        // ----- Copy and interleave V and U planes (NV21) -----
-        val uBuffer = uPlane.buffer
-        val vBuffer = vPlane.buffer
-        val uRowStride = uPlane.rowStride
-        val vRowStride = vPlane.rowStride
-        val uvPixelStride = uPlane.pixelStride  // same as vPlane.pixelStride
-
-        for (row in 0 until height / 2) {
-            var uPos = row * uRowStride
-            var vPos = row * vRowStride
-            for (col in 0 until width / 2) {
-                nv21[offset++] = vBuffer.get(vPos)
-                nv21[offset++] = uBuffer.get(uPos)
-                vPos += uvPixelStride
-                uPos += uvPixelStride
+            val matrix = Matrix().apply {
+                postRotate(rotation.toFloat())
+                when (rotation) {
+                    90 -> postTranslate(image.height.toFloat(), 0f)
+                    180 -> postTranslate(image.width.toFloat(), image.height.toFloat())
+                    270 -> postTranslate(0f, image.width.toFloat())
+                }
             }
+            val canvas = Canvas(rotatedBitmap!!)
+            canvas.drawBitmap(bitmap, matrix, null)
+            rotatedBitmap!!
+        } else {
+            bitmap
         }
 
-        // Ensure the array is the expected size before creating YuvImage
-        if (offset != expectedSize) {
-            Log.e(TAG, "NV21 array size mismatch: wrote $offset bytes, expected $expectedSize")
-            return ByteArray(0)
-        }
+        this.target = Size(finalBitmap.width, finalBitmap.height)
 
-        val yuvImage = YuvImage(nv21, ImageFormat.NV21, width, height, null)
         jpegOutputStream.reset()
-        yuvImage.compressToJpeg(Rect(0, 0, width, height), 80, jpegOutputStream)
-        var imageBytes = jpegOutputStream.toByteArray()
-
-        Log.d(TAG, "YUV to JPEG compression completed - bytes: ${imageBytes.size}")
-
-        val rotation = image.imageInfo.rotationDegrees.toFloat()
-        if (rotation != 0f) {
-            Log.d(TAG, "Applying rotation: ${rotation} degrees")
-            val bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
-            val matrix = Matrix().apply { postRotate(rotation) }
-            val rotatedBitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
-            this.target = Size(rotatedBitmap.width, rotatedBitmap.height)
-            jpegOutputStream.reset()
-            rotatedBitmap.compress(Bitmap.CompressFormat.JPEG, 80, jpegOutputStream)
-            imageBytes = jpegOutputStream.toByteArray()
-        }
-
+        finalBitmap.compress(Bitmap.CompressFormat.JPEG, 80, jpegOutputStream)
+        val imageBytes = jpegOutputStream.toByteArray()
         Log.d(TAG, "JPEG conversion completed - final bytes: ${imageBytes.size}")
         return imageBytes
     }
