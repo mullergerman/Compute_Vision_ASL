@@ -99,6 +99,15 @@ Configurar Telegraf para enviar a InfluxDB:
   bucket = "example-bucket"
 ```
 
+### Métricas del backend
+El archivo `telegraf/backend-metrics.conf` expone un `[[inputs.http_listener_v2]]` en el puerto **8090** para recibir métricas del backend.
+El agente usa `flush_interval = "1s"` y un `metric_buffer_limit = 50000` para tolerar ráfagas de tráfico.
+Luego de modificar esta configuración recargá Telegraf:
+
+```bash
+sudo systemctl reload telegraf
+```
+
 ## 9) SELinux (Fedora/RHEL)
 Si tenés SELinux en *enforcing*, etiquetá las carpetas montadas para que los contenedores puedan acceder:
 ```bash
