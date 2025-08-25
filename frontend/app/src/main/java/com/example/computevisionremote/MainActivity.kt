@@ -318,6 +318,8 @@ class MainActivity : AppCompatActivity() {
             jpegOutputStream.reset()
             rotatedBitmap.compress(Bitmap.CompressFormat.JPEG, 80, jpegOutputStream)
             imageBytes = jpegOutputStream.toByteArray()
+            bitmap.recycle()
+            rotatedBitmap.recycle()
         }
 
         Log.d(TAG, "JPEG conversion completed - final bytes: ${imageBytes.size}")
