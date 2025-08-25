@@ -31,6 +31,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
+import java.nio.ByteBuffer
 
 
 class MainActivity : AppCompatActivity() {
@@ -276,23 +277,20 @@ class MainActivity : AppCompatActivity() {
         val yuvImage = YuvImage(nv21, ImageFormat.NV21, width, height, null)
         jpegOutputStream.reset()
         yuvImage.compressToJpeg(Rect(0, 0, width, height), 80, jpegOutputStream)
-        var imageBytes = jpegOutputStream.toByteArray()
+        val jpegBytes = jpegOutputStream.toByteArray()
 
-        Log.d(TAG, "YUV to JPEG compression completed - bytes: ${imageBytes.size}")
+        Log.d(TAG, "YUV to JPEG compression completed - bytes: ${jpegBytes.size}")
 
-        val rotation = image.imageInfo.rotationDegrees.toFloat()
-        if (rotation != 0f) {
-            Log.d(TAG, "Applying rotation: ${rotation} degrees")
-            val bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
-            val matrix = Matrix().apply { postRotate(rotation) }
-            val rotatedBitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
-            this.target = Size(rotatedBitmap.width, rotatedBitmap.height)
-            jpegOutputStream.reset()
-            rotatedBitmap.compress(Bitmap.CompressFormat.JPEG, 80, jpegOutputStream)
-            imageBytes = jpegOutputStream.toByteArray()
-        }
+        val rotation = image.imageInfo.rotationDegrees
+        Log.d(TAG, "Captured rotation: $rotation degrees")
+        this.target = Size(width, height)
 
-        Log.d(TAG, "JPEG conversion completed - final bytes: ${imageBytes.size}")
+        val buffer = ByteBuffer.allocate(4 + jpegBytes.size)
+        buffer.putInt(rotation)
+        buffer.put(jpegBytes)
+        val imageBytes = buffer.array()
+
+        Log.d(TAG, "JPEG conversion completed - final bytes with rotation metadata: ${imageBytes.size}")
         return imageBytes
     }
 
