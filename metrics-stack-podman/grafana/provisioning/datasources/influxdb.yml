@@ -4,10 +4,11 @@ datasources:
   - name: InfluxDB
     type: influxdb
     access: proxy
-    url: http://influxdb:8086
+    url: http://127.0.0.1:8086
     isDefault: true
     editable: true
     jsonData:
+      version: Flux
       organization: example-org
       defaultBucket: example-bucket
       httpMode: POST
