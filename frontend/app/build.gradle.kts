@@ -49,7 +49,10 @@ dependencies {
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
-    implementation(libs.androidx.camera.view)
+    implementation(platform("androidx.camera:camera-bom:1.4.1"))
+    implementation("androidx.camera:camera-camera2")
+    implementation("androidx.camera:camera-lifecycle")
+    implementation("androidx.camera:camera-view")
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
@@ -58,14 +61,6 @@ dependencies {
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
     implementation("androidx.appcompat:appcompat:1.7.0")
-    implementation("androidx.camera:camera-lifecycle:1.4.2")
     implementation("org.java-websocket:Java-WebSocket:1.5.7")
-    // ... other dependencies
-    implementation("androidx.camera:camera-camera2:1.3.1") // Or the latest version
-    // You'll also likely need camera-core and camera-lifecycle
-    implementation("androidx.camera:camera-core:1.3.1")
-    implementation("androidx.camera:camera-lifecycle:1.3.1")
-    // If you're using CameraView for previews
-    implementation("androidx.camera:camera-view:1.3.1")
     implementation("androidx.renderscript:renderscript-toolkit:1.0.0")
 }
