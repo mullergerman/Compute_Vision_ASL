@@ -311,35 +311,82 @@ class MainActivity : AppCompatActivity() {
             return ByteArray(0)
         }
 
+        var rotWidth = width
+        var rotHeight = height
+        var nv21Rotated = nv21
+        val rotation = image.imageInfo.rotationDegrees
+        if (rotation != 0) {
+            val rotationTime = measureTimeMillis {
+                nv21Rotated = rotateNV21(nv21, width, height, rotation)
+            }
+            Log.d(TAG, "faseRotacion took $rotationTime ms")
+            if (rotation == 90 || rotation == 270) {
+                rotWidth = height
+                rotHeight = width
+            }
+        }
+        this.target = Size(rotWidth, rotHeight)
+
         var imageBytes: ByteArray
         val jpegTime = measureTimeMillis {
-            val yuvImage = YuvImage(nv21, ImageFormat.NV21, width, height, null)
+            val yuvImage = YuvImage(nv21Rotated, ImageFormat.NV21, rotWidth, rotHeight, null)
             jpegOutputStream.reset()
-            yuvImage.compressToJpeg(Rect(0, 0, width, height), 80, jpegOutputStream)
+            yuvImage.compressToJpeg(Rect(0, 0, rotWidth, rotHeight), 80, jpegOutputStream)
             imageBytes = jpegOutputStream.toByteArray()
         }
         Log.d(TAG, "faseJpeg took $jpegTime ms")
-        Log.d(TAG, "YUV to JPEG compression completed - bytes: ${imageBytes.size}")
-
-        val rotation = image.imageInfo.rotationDegrees.toFloat()
-        if (rotation != 0f) {
-            val rotationTime = measureTimeMillis {
-                Log.d(TAG, "Applying rotation: ${rotation} degrees")
-                val bitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
-                val matrix = Matrix().apply { postRotate(rotation) }
-                val rotatedBitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
-                this.target = Size(rotatedBitmap.width, rotatedBitmap.height)
-                jpegOutputStream.reset()
-                rotatedBitmap.compress(Bitmap.CompressFormat.JPEG, 80, jpegOutputStream)
-                imageBytes = jpegOutputStream.toByteArray()
-                bitmap.recycle()
-                rotatedBitmap.recycle()
-            }
-            Log.d(TAG, "faseRotacion took $rotationTime ms")
-        }
-
         Log.d(TAG, "JPEG conversion completed - final bytes: ${imageBytes.size}")
         return imageBytes
+    }
+
+    private fun rotateNV21(src: ByteArray, width: Int, height: Int, rotation: Int): ByteArray {
+        if (rotation == 0) return src
+        val dst = ByteArray(src.size)
+        val frameSize = width * height
+        var destIdx = 0
+        when (rotation) {
+            90 -> {
+                for (x in 0 until width) {
+                    for (y in height - 1 downTo 0) {
+                        dst[destIdx++] = src[y * width + x]
+                    }
+                }
+                for (x in 0 until width step 2) {
+                    for (y in height / 2 - 1 downTo 0) {
+                        val index = frameSize + y * width + x
+                        dst[destIdx++] = src[index]
+                        dst[destIdx++] = src[index + 1]
+                    }
+                }
+            }
+            180 -> {
+                for (i in frameSize - 1 downTo 0) {
+                    dst[destIdx++] = src[i]
+                }
+                for (i in src.size - 2 downTo frameSize step 2) {
+                    dst[destIdx++] = src[i]
+                    dst[destIdx++] = src[i + 1]
+                }
+            }
+            270 -> {
+                for (x in width - 1 downTo 0) {
+                    for (y in 0 until height) {
+                        dst[destIdx++] = src[y * width + x]
+                    }
+                }
+                for (x in width - 2 downTo 0 step 2) {
+                    for (y in 0 until height / 2) {
+                        val index = frameSize + y * width + x
+                        dst[destIdx++] = src[index]
+                        dst[destIdx++] = src[index + 1]
+                    }
+                }
+            }
+            else -> {
+                System.arraycopy(src, 0, dst, 0, src.size)
+            }
+        }
+        return dst
     }
 
     private fun sendFrameToServer(frameBytes: ByteArray) {
