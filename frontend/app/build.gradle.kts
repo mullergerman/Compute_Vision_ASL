@@ -36,6 +36,12 @@ android {
     }
     buildFeatures {
         compose = true
+        prefab = true
+    }
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+        }
     }
 }
 
@@ -67,4 +73,5 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:1.3.1")
     // If you're using CameraView for previews
     implementation("androidx.camera:camera-view:1.3.1")
+    implementation("io.github.crow-misia:libyuv:0.1.3")
 }

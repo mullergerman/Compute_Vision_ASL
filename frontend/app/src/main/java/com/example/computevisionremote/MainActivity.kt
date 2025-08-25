@@ -31,6 +31,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
+import java.nio.ByteBuffer
 import kotlin.system.measureTimeMillis
 
 
@@ -72,7 +73,18 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "MainActivity"
+        init {
+            System.loadLibrary("yuvconverter")
+        }
     }
+
+    private external fun yuv420ToNv21(
+        yBuffer: ByteBuffer, yRowStride: Int, yPixelStride: Int,
+        uBuffer: ByteBuffer, uRowStride: Int, uPixelStride: Int,
+        vBuffer: ByteBuffer, vRowStride: Int, vPixelStride: Int,
+        width: Int, height: Int,
+        nv21Buffer: ByteBuffer
+    )
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -243,73 +255,21 @@ class MainActivity : AppCompatActivity() {
 
         val expectedSize = width * height * 3 / 2
         val nv21 = ByteArray(expectedSize)
-        var offset = 0
+        val nv21Buffer = ByteBuffer.allocateDirect(expectedSize)
 
         val yuvTime = measureTimeMillis {
-            // ----- Copy Y plane row by row -----
-            val yBuffer = yPlane.buffer
-            val yRowStride = yPlane.rowStride
-            val yPixelStride = yPlane.pixelStride
-            if (yPixelStride == 1) {
-                for (row in 0 until height) {
-                    val yPos = row * yRowStride
-                    yBuffer.position(yPos)
-                    yBuffer.get(nv21, offset, width)
-                    offset += width
-                }
-            } else {
-                for (row in 0 until height) {
-                    var yPos = row * yRowStride
-                    for (col in 0 until width) {
-                        nv21[offset++] = yBuffer.get(yPos)
-                        yPos += yPixelStride
-                    }
-                }
-            }
-
-            // ----- Copy and interleave V and U planes (NV21) -----
-            val uBuffer = uPlane.buffer
-            val vBuffer = vPlane.buffer
-            val uRowStride = uPlane.rowStride
-            val vRowStride = vPlane.rowStride
-            val uvPixelStride = uPlane.pixelStride  // same as vPlane.pixelStride
-
-            if (uvPixelStride == 1) {
-                val rowSize = width / 2
-                val vRow = ByteArray(rowSize)
-                val uRow = ByteArray(rowSize)
-                for (row in 0 until height / 2) {
-                    vBuffer.position(row * vRowStride)
-                    vBuffer.get(vRow, 0, rowSize)
-                    uBuffer.position(row * uRowStride)
-                    uBuffer.get(uRow, 0, rowSize)
-                    var col = 0
-                    while (col < rowSize) {
-                        nv21[offset++] = vRow[col]
-                        nv21[offset++] = uRow[col]
-                        col++
-                    }
-                }
-            } else {
-                for (row in 0 until height / 2) {
-                    var uPos = row * uRowStride
-                    var vPos = row * vRowStride
-                    for (col in 0 until width / 2) {
-                        nv21[offset++] = vBuffer.get(vPos)
-                        nv21[offset++] = uBuffer.get(uPos)
-                        vPos += uvPixelStride
-                        uPos += uvPixelStride
-                    }
-                }
-            }
+            yuv420ToNv21(
+                yPlane.buffer, yPlane.rowStride, yPlane.pixelStride,
+                uPlane.buffer, uPlane.rowStride, uPlane.pixelStride,
+                vPlane.buffer, vPlane.rowStride, vPlane.pixelStride,
+                width, height,
+                nv21Buffer
+            )
         }
         Log.d(TAG, "faseYuv took $yuvTime ms")
 
-        // Ensure the array is the expected size before creating YuvImage
-        if (offset != expectedSize) {
-            Log.e(TAG, "NV21 array size mismatch: wrote $offset bytes, expected $expectedSize")
-            return ByteArray(0)
-        }
+        nv21Buffer.rewind()
+        nv21Buffer.get(nv21)
 
         var rotWidth = width
         var rotHeight = height
