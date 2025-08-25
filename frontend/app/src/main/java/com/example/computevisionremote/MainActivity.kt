@@ -32,6 +32,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
 import kotlin.system.measureTimeMillis
+import java.nio.ByteBuffer
 
 
 class MainActivity : AppCompatActivity() {
@@ -219,8 +220,8 @@ class MainActivity : AppCompatActivity() {
                 return@setAnalyzer
             }
 
-            val jpegBytes = imageProxyToBitmap(imageProxy)
-            sendFrameToServer(jpegBytes)
+            val yuvData = imageProxyToYuvWithMetadata(imageProxy)
+            sendFrameToServer(yuvData)
             imageProxy.close()
         }
 
@@ -228,6 +229,121 @@ class MainActivity : AppCompatActivity() {
 
         provider.unbindAll()
         provider.bindToLifecycle(this, selector, preview, imageAnalysis)
+    }
+
+    private fun imageProxyToYuvWithMetadata(image: ImageProxy): ByteArray {
+        Log.d(TAG, "Converting ImageProxy to YUV data - size: ${image.width}x${image.height}, format: ${image.format}")
+
+        val width = image.width
+        val height = image.height
+        val rotation = image.imageInfo.rotationDegrees
+
+        // Y, U and V planes
+        val yPlane = image.planes[0]
+        val uPlane = image.planes[1]
+        val vPlane = image.planes[2]
+
+        val expectedSize = width * height * 3 / 2
+        val nv21 = ByteArray(expectedSize)
+        var offset = 0
+
+        val yuvTime = measureTimeMillis {
+            // ----- Copy Y plane row by row -----
+            val yBuffer = yPlane.buffer
+            val yRowStride = yPlane.rowStride
+            val yPixelStride = yPlane.pixelStride
+            if (yPixelStride == 1) {
+                for (row in 0 until height) {
+                    val yPos = row * yRowStride
+                    yBuffer.position(yPos)
+                    yBuffer.get(nv21, offset, width)
+                    offset += width
+                }
+            } else {
+                for (row in 0 until height) {
+                    var yPos = row * yRowStride
+                    for (col in 0 until width) {
+                        nv21[offset++] = yBuffer.get(yPos)
+                        yPos += yPixelStride
+                    }
+                }
+            }
+
+            // ----- Copy and interleave V and U planes (NV21) -----
+            val uBuffer = uPlane.buffer
+            val vBuffer = vPlane.buffer
+            val uRowStride = uPlane.rowStride
+            val vRowStride = vPlane.rowStride
+            val uvPixelStride = uPlane.pixelStride  // same as vPlane.pixelStride
+
+            if (uvPixelStride == 1) {
+                val rowSize = width / 2
+                val vRow = ByteArray(rowSize)
+                val uRow = ByteArray(rowSize)
+                for (row in 0 until height / 2) {
+                    vBuffer.position(row * vRowStride)
+                    vBuffer.get(vRow, 0, rowSize)
+                    uBuffer.position(row * uRowStride)
+                    uBuffer.get(uRow, 0, rowSize)
+                    var col = 0
+                    while (col < rowSize) {
+                        nv21[offset++] = vRow[col]
+                        nv21[offset++] = uRow[col]
+                        col++
+                    }
+                }
+            } else {
+                for (row in 0 until height / 2) {
+                    var uPos = row * uRowStride
+                    var vPos = row * vRowStride
+                    for (col in 0 until width / 2) {
+                        nv21[offset++] = vBuffer.get(vPos)
+                        nv21[offset++] = uBuffer.get(uPos)
+                        vPos += uvPixelStride
+                        uPos += uvPixelStride
+                    }
+                }
+            }
+        }
+        Log.d(TAG, "YUV extraction took $yuvTime ms")
+
+        // Ensure the array is the expected size
+        if (offset != expectedSize) {
+            Log.e(TAG, "NV21 array size mismatch: wrote $offset bytes, expected $expectedSize")
+            return ByteArray(0)
+        }
+
+        // Apply rotation if needed
+        var rotWidth = width
+        var rotHeight = height
+        var nv21Rotated = nv21
+        if (rotation != 0) {
+            val rotationTime = measureTimeMillis {
+                nv21Rotated = rotateNV21(nv21, width, height, rotation)
+            }
+            Log.d(TAG, "YUV rotation took $rotationTime ms")
+            if (rotation == 90 || rotation == 270) {
+                rotWidth = height
+                rotHeight = width
+            }
+        }
+        this.target = Size(rotWidth, rotHeight)
+
+        // Create metadata header (16 bytes)
+        val metadata = ByteBuffer.allocate(16)
+            .putInt(rotWidth)       // 4 bytes - width
+            .putInt(rotHeight)      // 4 bytes - height
+            .putInt(rotation)       // 4 bytes - rotation
+            .putInt(nv21Rotated.size)  // 4 bytes - YUV data size
+            .array()
+
+        // Combine metadata + YUV data
+        val finalData = ByteArray(metadata.size + nv21Rotated.size)
+        System.arraycopy(metadata, 0, finalData, 0, metadata.size)
+        System.arraycopy(nv21Rotated, 0, finalData, metadata.size, nv21Rotated.size)
+
+        Log.d(TAG, "YUV data prepared - final bytes: ${finalData.size} (${metadata.size} metadata + ${nv21Rotated.size} YUV)")
+        return finalData
     }
 
     private fun imageProxyToBitmap(image: ImageProxy): ByteArray {

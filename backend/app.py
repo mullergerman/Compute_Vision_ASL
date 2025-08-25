@@ -5,6 +5,7 @@ import time
 import os
 import urllib.request
 import urllib.parse
+import struct
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -100,6 +101,69 @@ def predict_letter(hand_landmarks) -> str:
     except Exception:
         return ""
 
+def parse_yuv_data(data):
+    """Parse YUV data with metadata header.
+    
+    Expected format:
+    - 16 bytes header: width(4), height(4), rotation(4), yuv_size(4)
+    - YUV data (NV21 format)
+    
+    Returns: (width, height, rotation, yuv_array) or None if invalid
+    """
+    try:
+        if len(data) < 16:
+            print(f"Data too short: {len(data)} bytes, expected at least 16 bytes header")
+            return None
+            
+        # Parse metadata header (16 bytes)
+        header = data[:16]
+        width, height, rotation, yuv_size = struct.unpack('>IIII', header)  # Big-endian
+        
+        print(f"YUV metadata: width={width}, height={height}, rotation={rotation}, yuv_size={yuv_size}")
+        
+        # Validate metadata
+        expected_yuv_size = width * height * 3 // 2
+        if yuv_size != expected_yuv_size:
+            print(f"Invalid YUV size: expected {expected_yuv_size}, got {yuv_size}")
+            return None
+            
+        if len(data) != 16 + yuv_size:
+            print(f"Data size mismatch: expected {16 + yuv_size}, got {len(data)}")
+            return None
+            
+        # Extract YUV data
+        yuv_data = data[16:]
+        yuv_array = np.frombuffer(yuv_data, dtype=np.uint8)
+        
+        return width, height, rotation, yuv_array
+        
+    except Exception as e:
+        print(f"Error parsing YUV data: {e}")
+        return None
+
+def yuv_to_rgb(yuv_data, width, height):
+    """Convert NV21 YUV data to RGB using OpenCV.
+    
+    Args:
+        yuv_data: NV21 format YUV data as numpy array
+        width: Image width
+        height: Image height
+        
+    Returns: RGB image as numpy array
+    """
+    try:
+        # Reshape YUV data for OpenCV
+        yuv_image = yuv_data.reshape((height * 3 // 2, width))
+        
+        # Convert NV21 to RGB
+        rgb_image = cv2.cvtColor(yuv_image, cv2.COLOR_YUV2RGB_NV21)
+        
+        return rgb_image
+        
+    except Exception as e:
+        print(f"Error converting YUV to RGB: {e}")
+        return None
+
 @sock.route('/ws')
 def process_video(ws):
     while True:
@@ -111,13 +175,35 @@ def process_video(ws):
             if isinstance(data, str):
                 data = data.encode('utf-8')
 
-            np_arr = np.frombuffer(data, dtype=np.uint8)
-            frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-            if frame is None:
-                continue
-
-            # Convert to RGB
-            image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            # Try to parse as YUV data first
+            yuv_result = parse_yuv_data(data)
+            
+            if yuv_result is not None:
+                # Process YUV data
+                width, height, rotation, yuv_array = yuv_result
+                print(f"Processing YUV frame: {width}x{height}, rotation={rotation}")
+                
+                # Convert YUV to RGB
+                start_conversion = time.perf_counter()
+                image_rgb = yuv_to_rgb(yuv_array, width, height)
+                end_conversion = time.perf_counter()
+                conversion_time_ms = (end_conversion - start_conversion) * 1000
+                print(f"YUV to RGB conversion took {conversion_time_ms:.2f} ms")
+                
+                if image_rgb is None:
+                    continue
+                    
+            else:
+                # Fallback: try to decode as JPEG
+                print("Falling back to JPEG decoding")
+                np_arr = np.frombuffer(data, dtype=np.uint8)
+                frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+                if frame is None:
+                    continue
+                    
+                # Convert BGR to RGB for JPEG fallback
+                image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                width, height = frame.shape[1], frame.shape[0]
             
             # Process MediaPipe Hands Detection
             start_mediapipe = time.perf_counter()
@@ -135,8 +221,8 @@ def process_video(ws):
                     base = idx * len(hand_landmarks.landmark)
                     # Append keypoints
                     for lm in hand_landmarks.landmark:
-                        x_px = int(lm.x * frame.shape[1])
-                        y_px = int(lm.y * frame.shape[0])
+                        x_px = int(lm.x * width)
+                        y_px = int(lm.y * height)
                         keypoints.append([x_px, y_px])
 
                     # Offset the predefined topology
@@ -162,8 +248,8 @@ def process_video(ws):
             response = {
                 "keypoints": keypoints if keypoints else [],
                 "topology": topology if topology else [],
-                "image_width": frame.shape[1],
-                "image_height": frame.shape[0],
+                "image_width": width,
+                "image_height": height,
                 "letter": letter if letter else ""
             }
             ws.send(json.dumps(response))
