@@ -33,6 +33,10 @@ import java.net.URL
 import java.util.concurrent.Executors
 import kotlin.system.measureTimeMillis
 import java.nio.ByteBuffer
+import java.util.concurrent.BlockingQueue
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.TimeUnit
 
 
 class MainActivity : AppCompatActivity() {
@@ -73,17 +77,18 @@ class MainActivity : AppCompatActivity() {
 
     private val CAMERA_PERMISSION_REQUEST_CODE = 101
 
-    // HTTP executor for sending metrics
-    private val httpExecutor = Executors.newSingleThreadExecutor()
+    // Async metrics system
     private val telegrafUrl = "http://glmuller.ddns.net:8088/ingest"
+    private val metricsQueue: BlockingQueue<MetricData> = LinkedBlockingQueue()
+    private val metricsExecutor: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
+    private var isMetricsSystemRunning = false
     
-    // Circuit breaker for InfluxDB
-    private var influxFailureCount = 0
-    private var lastInfluxAttempt = 0L
-    private val maxInfluxFailures = 5
-    private val influxRetryDelay = 30000L // 30 seconds
-    private var lastMetricSent = 0L
-    private val metricSendInterval = 1000L // Send metrics max once per second
+    // Data class for metrics
+    data class MetricData(
+        val delay: Long,
+        val fps: Float,
+        val timestamp: Long = System.currentTimeMillis()
+    )
 
     companion object {
         private const val TAG = "MainActivity"
@@ -148,6 +153,9 @@ class MainActivity : AppCompatActivity() {
         } else {
             requestCameraPermission()
         }
+        
+        // Start async metrics system
+        startMetricsSystem()
     }
 
 
@@ -556,65 +564,106 @@ class MainActivity : AppCompatActivity() {
         Log.d("MainActivity", "Frame sent successfully via WebSocket")
     }
 
-    private fun sendDelayToInfluxDB(delay: Long, fps: Float) {
-        // Circuit breaker: skip if too many recent failures
-        val currentTime = System.currentTimeMillis()
-        if (influxFailureCount >= maxInfluxFailures) {
-            if (currentTime - lastInfluxAttempt < influxRetryDelay) {
-                return // Skip sending, still in cooldown
-            } else {
-                // Reset after cooldown period
-                influxFailureCount = 0
-                Log.i(TAG, "InfluxDB circuit breaker reset, retrying")
-            }
+    private fun startMetricsSystem() {
+        if (isMetricsSystemRunning) return
+        
+        isMetricsSystemRunning = true
+        Log.i(TAG, "Starting async metrics system")
+        
+        // Schedule metrics processor to run every 1 second
+        metricsExecutor.scheduleAtFixedRate({
+            processMetricsQueue()
+        }, 1, 1, TimeUnit.SECONDS)
+    }
+    
+    private fun stopMetricsSystem() {
+        isMetricsSystemRunning = false
+        metricsExecutor.shutdown()
+        metricsQueue.clear()
+        Log.i(TAG, "Stopped async metrics system")
+    }
+    
+    private fun queueMetric(delay: Long, fps: Float) {
+        // Non-blocking queue operation - if queue is full, oldest items are dropped
+        val metric = MetricData(delay, fps)
+        
+        if (!metricsQueue.offer(metric)) {
+            // Queue is full, remove oldest and add new
+            metricsQueue.poll()
+            metricsQueue.offer(metric)
+            Log.w(TAG, "Metrics queue full, dropped oldest metric")
+        }
+    }
+    
+    private fun processMetricsQueue() {
+        if (metricsQueue.isEmpty()) {
+            return
         }
         
-        lastInfluxAttempt = currentTime
+        // Get the most recent metric (aggregate if multiple)
+        val metrics = mutableListOf<MetricData>()
+        metricsQueue.drainTo(metrics)
         
-        httpExecutor.execute {
-            try {
-                val url = URL(telegrafUrl)
-                val connection = url.openConnection() as HttpURLConnection
-                
-                // Set timeouts to prevent hanging
-                connection.connectTimeout = 3000 // 3 seconds
-                connection.readTimeout = 3000    // 3 seconds
-                
-                connection.requestMethod = "POST"
-                connection.setRequestProperty("Content-Type", "application/json")
-                connection.setRequestProperty("Accept", "application/json")
-                connection.doOutput = true
-                
-                val jsonData = JSONObject().apply {
-                    put("measurement", "frontend")
-                    put("ts", System.currentTimeMillis())
-                    put("fe", "frontend")  // frontend tag as requested
-                    put("delay_ms", delay)
-                    put("fps", fps)
-                    put("session", "android_session")
-                    put("device", Build.MODEL)
-                    put("app_ver", "1.0")
-                }
-                
-                connection.outputStream.use { os ->
-                    os.write(jsonData.toString().toByteArray())
-                    os.flush()
-                }
-                
-                val responseCode = connection.responseCode
-                if (responseCode == HttpURLConnection.HTTP_OK) {
-                    influxFailureCount = 0 // Reset failure count on success
-                    Log.d(TAG, "Successfully sent delay metrics to InfluxDB: ${delay}ms, ${fps}fps")
-                } else {
-                    influxFailureCount++
-                    Log.w(TAG, "Failed to send delay metrics, response code: $responseCode (failures: $influxFailureCount)")
-                }
-                
-                connection.disconnect()
-            } catch (e: Exception) {
-                influxFailureCount++
-                Log.e(TAG, "Error sending delay metrics to InfluxDB (failures: $influxFailureCount)", e)
+        if (metrics.isEmpty()) return
+        
+        // Use the most recent metric or calculate average
+        val latestMetric = if (metrics.size == 1) {
+            metrics[0]
+        } else {
+            // Calculate average if we have multiple metrics
+            val avgDelay = metrics.map { it.delay }.average().toLong()
+            val avgFps = metrics.map { it.fps }.average().toFloat()
+            MetricData(avgDelay, avgFps)
+        }
+        
+        Log.d(TAG, "Processing metrics batch: ${metrics.size} items, avg delay: ${latestMetric.delay}ms, avg fps: ${latestMetric.fps}")
+        
+        // Send to InfluxDB with no retries - fire and forget
+        sendMetricToInfluxDB(latestMetric)
+    }
+    
+    private fun sendMetricToInfluxDB(metric: MetricData) {
+        try {
+            val url = URL(telegrafUrl)
+            val connection = url.openConnection() as HttpURLConnection
+            
+            // Aggressive timeouts - fail fast
+            connection.connectTimeout = 2000 // 2 seconds
+            connection.readTimeout = 2000    // 2 seconds
+            
+            connection.requestMethod = "POST"
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.setRequestProperty("Accept", "application/json")
+            connection.doOutput = true
+            
+            val jsonData = JSONObject().apply {
+                put("measurement", "frontend")
+                put("ts", metric.timestamp)
+                put("fe", "frontend")
+                put("delay_ms", metric.delay)
+                put("fps", metric.fps)
+                put("session", "android_session")
+                put("device", Build.MODEL)
+                put("app_ver", "1.0")
             }
+            
+            connection.outputStream.use { os ->
+                os.write(jsonData.toString().toByteArray())
+                os.flush()
+            }
+            
+            val responseCode = connection.responseCode
+            if (responseCode == HttpURLConnection.HTTP_OK) {
+                Log.d(TAG, "✓ Metrics sent: ${metric.delay}ms, ${metric.fps}fps")
+            } else {
+                Log.w(TAG, "✗ Metrics failed: HTTP $responseCode - dropping and continuing")
+            }
+            
+            connection.disconnect()
+            
+        } catch (e: Exception) {
+            // Fail silently and continue - no retries
+            Log.w(TAG, "✗ Metrics error: ${e.message} - dropping and continuing")
         }
     }
 
@@ -676,12 +725,8 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
                 
-                // Send delay metrics to InfluxDB (with throttling)
-                val currentTime = System.currentTimeMillis()
-                if (currentTime - lastMetricSent > metricSendInterval) {
-                    sendDelayToInfluxDB(delay, fps)
-                    lastMetricSent = currentTime
-                }
+                // Queue metrics asynchronously (non-blocking)
+                queueMetric(delay, fps)
                 
                 waitingForResponse.set(false)
             }
@@ -736,7 +781,7 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
         networkCallback?.let { connectivityManager.unregisterNetworkCallback(it) }
         disconnectSocket(true)
-        httpExecutor.shutdown()
+        stopMetricsSystem()
     }
 
     private fun drawOverlay(json: JSONObject) {

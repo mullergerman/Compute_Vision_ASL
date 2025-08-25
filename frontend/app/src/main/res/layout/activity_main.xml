@@ -48,30 +48,58 @@
         android:textSize="48sp" />
 
     <LinearLayout
-        android:layout_width="wrap_content"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_gravity="end|bottom"
+        android:layout_gravity="bottom"
         android:layout_margin="16dp"
-        android:orientation="horizontal">
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:weightSum="3">
 
         <Button
             android:id="@+id/connectButton"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:text="Conectar" />
+            android:layout_weight="1"
+            android:layout_marginEnd="4dp"
+            android:text="Conectar"
+            android:singleLine="true"
+            android:maxLines="1"
+            android:ellipsize="none"
+            android:autoSizeTextType="uniform"
+            android:autoSizeMinTextSize="8sp"
+            android:autoSizeMaxTextSize="10sp"
+            android:autoSizeStepGranularity="1sp" />
 
         <Button
             android:id="@+id/disconnectButton"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp"
             android:text="Desconectar"
-            android:layout_marginStart="8dp" />
+            android:singleLine="true"
+            android:maxLines="1"
+            android:ellipsize="none"
+            android:autoSizeTextType="uniform"
+            android:autoSizeMinTextSize="8sp"
+            android:autoSizeMaxTextSize="10sp"
+            android:autoSizeStepGranularity="1sp" />
 
         <Button
             android:id="@+id/switchCameraButton"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:text="Switch Camara"
-            android:layout_marginStart="8dp" />
+            android:layout_weight="1"
+            android:layout_marginStart="4dp"
+            android:text="Cámara"
+            android:singleLine="true"
+            android:maxLines="1"
+            android:ellipsize="none"
+            android:autoSizeTextType="uniform"
+            android:autoSizeMinTextSize="8sp"
+            android:autoSizeMaxTextSize="10sp"
+            android:autoSizeStepGranularity="1sp" />
     </LinearLayout>
 </FrameLayout>
