@@ -62,5 +62,4 @@ dependencies {
     debugImplementation(libs.androidx.ui.test.manifest)
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("org.java-websocket:Java-WebSocket:1.5.7")
-    implementation("androidx.renderscript:renderscript-toolkit:1.0.0")
 }
