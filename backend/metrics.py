@@ -22,8 +22,10 @@ import json
 import os
 import queue
 import threading
+import time
 from typing import Dict, Iterable, Optional, Tuple
-from urllib import request
+
+import requests
 
 
 Metric = Tuple[str, Dict[str, str], Dict[str, object], Optional[int]]
@@ -61,6 +63,7 @@ class TelegrafClient:
         )
 
         self.url = f"http://{self.host}:8088/ingest"
+        self._session = requests.Session()
         self._queue: "queue.Queue[Metric]" = queue.Queue()
         self._stop = threading.Event()
 
@@ -103,12 +106,19 @@ class TelegrafClient:
                 data = self._metrics_to_line(metrics)
                 headers = {"Content-Type": "text/plain"}
 
-            req = request.Request(self.url, data=data, method="POST")
-            for key, value in headers.items():
-                req.add_header(key, value)
             if self.token:
-                req.add_header("Authorization", f"Token {self.token}")
-            request.urlopen(req, timeout=5)  # Best effort; ignore response
+                headers["Authorization"] = f"Token {self.token}"
+
+            for attempt in range(3):
+                try:
+                    self._session.post(
+                        self.url, data=data, headers=headers, timeout=5
+                    )
+                    break
+                except requests.RequestException:
+                    if attempt == 2:
+                        break
+                    time.sleep(2 ** attempt)
         except Exception:
             # Metrics are best-effort only; drop on failure
             pass
@@ -122,6 +132,7 @@ class TelegrafClient:
         finally:
             # Drain any leftover metrics to avoid growth on subsequent calls
             self._drain_queue()
+            self._session.close()
 
     # ------------------------------------------------------------------
     # Internal helpers
