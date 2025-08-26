@@ -119,7 +119,7 @@ def parse_yuv_data(data):
         header = data[:16]
         width, height, rotation, yuv_size = struct.unpack('>IIII', header)  # Big-endian
         
-        print(f"YUV metadata: width={width}, height={height}, rotation={rotation}, yuv_size={yuv_size}")
+        #print(f"YUV metadata: width={width}, height={height}, rotation={rotation}, yuv_size={yuv_size}")
         
         # Validate metadata
         expected_yuv_size = width * height * 3 // 2
@@ -196,7 +196,7 @@ def process_video(ws):
             continue
             
         last_processed_time = current_time
-        print(f"Processing frame {frame_count}")
+        #print(f"Processing frame {frame_count}")
 
         try:
             if isinstance(data, str):
@@ -208,14 +208,14 @@ def process_video(ws):
             if yuv_result is not None:
                 # Process YUV data
                 width, height, rotation, yuv_array = yuv_result
-                print(f"Processing YUV frame: {width}x{height}, rotation={rotation}")
+                #print(f"Processing YUV frame: {width}x{height}, rotation={rotation}")
                 
                 # Convert YUV to RGB
                 start_conversion = time.perf_counter()
                 image_rgb = yuv_to_rgb(yuv_array, width, height)
                 end_conversion = time.perf_counter()
                 conversion_time_ms = (end_conversion - start_conversion) * 1000
-                print(f"YUV to RGB conversion took {conversion_time_ms:.2f} ms")
+                #print(f"YUV to RGB conversion took {conversion_time_ms:.2f} ms")
                 
                 if image_rgb is None:
                     continue
