@@ -1,3 +1,8 @@
+import android.animation.ObjectAnimator
+import android.animation.AnimatorSet
+import android.view.View
+import android.view.animation.AccelerateDecelerateInterpolator
+import androidx.core.content.ContextCompat
 package com.example.computevisionremote
 
 import android.Manifest
@@ -45,6 +50,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var delayTextView: TextView
     private lateinit var fpsTextView: TextView
     private lateinit var letterTextView: TextView
+    private lateinit var statusTextView: TextView
     private lateinit var switchCameraButton: Button
     private lateinit var connectButton: Button
     private lateinit var disconnectButton: Button
@@ -77,6 +83,12 @@ class MainActivity : AppCompatActivity() {
 
     private val CAMERA_PERMISSION_REQUEST_CODE = 101
 
+    // Enhanced ASL letter display variables and functions
+    private var currentLetter: String = ""
+    private var letterDisplayTime: Long = 0
+    private var letterConfidenceCount: Int = 0
+    private val letterConfidenceThreshold = 3 // Show letter only after 3 consecutive detections
+
     // Async metrics system
     private val telegrafUrl = "http://glmuller.ddns.net:8088/ingest"
     private val metricsQueue: BlockingQueue<MetricData> = LinkedBlockingQueue()
@@ -104,6 +116,7 @@ class MainActivity : AppCompatActivity() {
         delayTextView = findViewById(R.id.delayTextView)
         fpsTextView = findViewById(R.id.fpsTextView)
         letterTextView = findViewById(R.id.letterTextView)
+        statusTextView = findViewById(R.id.statusTextView)
         switchCameraButton = findViewById(R.id.switchCameraButton)
         connectButton = findViewById(R.id.connectButton)
         disconnectButton = findViewById(R.id.disconnectButton)
@@ -720,7 +733,8 @@ class MainActivity : AppCompatActivity() {
                     fpsTextView.text = String.format("%.1f fps", fps)
                     if (message != null) {
                         val json = JSONObject(message)
-                        letterTextView.text = json.optString("letter", "")
+                        // Use enhanced letter display function
+                        updateASLLetterDisplay(json)
                         drawOverlay(json)
                     }
                 }
@@ -909,5 +923,130 @@ class MainActivity : AppCompatActivity() {
         }
 
         canvas?.let { overlay.holder.unlockCanvasAndPost(it) }
+    }
+    // Enhanced ASL letter display with visual effects
+    private fun updateASLLetterDisplay(json: JSONObject) {
+        val newLetter = json.optString("letter", "")
+        val currentTime = System.currentTimeMillis()
+        
+        // Extract debug info if available
+        val debugInfo = json.optJSONObject("debug_info")
+        var qualityScore = 0.0f
+        var isChallengingBackground = false
+        var needsEnhancement = false
+        
+        debugInfo?.let { debug ->
+            qualityScore = debug.optDouble("quality_score", 0.0).toFloat()
+            isChallengingBackground = debug.optBoolean("is_challenging", false)
+            needsEnhancement = debug.optBoolean("needs_enhancement", false)
+        }
+        
+        // Update status information
+        updateStatusDisplay(qualityScore, isChallengingBackground, needsEnhancement)
+        
+        when {
+            newLetter.isEmpty() -> {
+                // No letter detected - reset confidence and clear display gradually
+                letterConfidenceCount = 0
+                if (currentTime - letterDisplayTime > 2000) { // 2 seconds timeout
+                    fadeOutLetter()
+                }
+            }
+            
+            newLetter == currentLetter -> {
+                // Same letter detected - increase confidence
+                letterConfidenceCount++
+                if (letterConfidenceCount >= letterConfidenceThreshold) {
+                    // High confidence - update display with animation
+                    displayLetterWithAnimation(newLetter, qualityScore)
+                }
+            }
+            
+            else -> {
+                // New letter detected - reset confidence
+                currentLetter = newLetter
+                letterConfidenceCount = 1
+                letterDisplayTime = currentTime
+            }
+        }
+    }
+    
+    private fun displayLetterWithAnimation(letter: String, confidence: Float) {
+        runOnUiThread {
+            // Update text
+            letterTextView.text = letter
+            
+            // Choose color based on confidence/quality
+            val textColor = when {
+                confidence > 0.8f -> ContextCompat.getColor(this, R.color.letter_text_color) // High confidence - bright white
+                confidence > 0.5f -> ContextCompat.getColor(this, R.color.accent_primary) // Medium - green
+                else -> ContextCompat.getColor(this, R.color.status_text_color) // Low - gold
+            }
+            
+            letterTextView.setTextColor(textColor)
+            
+            // Scale animation for new letter
+            if (letterConfidenceCount == letterConfidenceThreshold) {
+                val scaleX = ObjectAnimator.ofFloat(letterTextView, "scaleX", 0.8f, 1.2f, 1.0f)
+                val scaleY = ObjectAnimator.ofFloat(letterTextView, "scaleY", 0.8f, 1.2f, 1.0f)
+                val alpha = ObjectAnimator.ofFloat(letterTextView, "alpha", 0.6f, 1.0f)
+                
+                val animatorSet = AnimatorSet()
+                animatorSet.playTogether(scaleX, scaleY, alpha)
+                animatorSet.duration = 300
+                animatorSet.interpolator = AccelerateDecelerateInterpolator()
+                animatorSet.start()
+            }
+            
+            // Update visibility
+            letterTextView.visibility = View.VISIBLE
+        }
+    }
+    
+    private fun fadeOutLetter() {
+        runOnUiThread {
+            val fadeOut = ObjectAnimator.ofFloat(letterTextView, "alpha", 1.0f, 0.3f)
+            fadeOut.duration = 500
+            fadeOut.start()
+            
+            // Clear text after animation
+            Handler(Looper.getMainLooper()).postDelayed({
+                letterTextView.text = ""
+                letterTextView.alpha = 1.0f
+                currentLetter = ""
+            }, 500)
+        }
+    }
+    
+    private fun updateStatusDisplay(qualityScore: Float, isChallengingBackground: Boolean, needsEnhancement: Boolean) {
+        runOnUiThread {
+            val statusText = when {
+                qualityScore > 0.8f -> "Excellent Detection"
+                qualityScore > 0.5f -> "Good Detection"
+                qualityScore > 0.0f -> "Poor Detection"
+                needsEnhancement -> "Processing..."
+                isChallengingBackground -> "Complex Background"
+                else -> ""
+            }
+            
+            if (statusText.isNotEmpty()) {
+                statusTextView.text = statusText
+                statusTextView.visibility = View.VISIBLE
+                
+                val statusColor = when {
+                    qualityScore > 0.7f -> ContextCompat.getColor(this, R.color.good_detection_color)
+                    qualityScore > 0.4f -> ContextCompat.getColor(this, R.color.status_text_color)
+                    else -> ContextCompat.getColor(this, R.color.poor_detection_color)
+                }
+                statusTextView.setTextColor(statusColor)
+                
+                // Auto-hide status after 3 seconds
+                Handler(Looper.getMainLooper()).postDelayed({
+                    statusTextView.visibility = View.GONE
+                }, 3000)
+            } else {
+                statusTextView.visibility = View.GONE
+            }
+        }
     }
 }
