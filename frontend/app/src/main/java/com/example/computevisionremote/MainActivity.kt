@@ -28,15 +28,6 @@ import java.util.ArrayDeque
 import androidx.appcompat.app.AppCompatActivity
 import org.json.JSONArray
 import java.util.concurrent.atomic.AtomicBoolean
-import android.animation.ObjectAnimator
-import android.animation.AnimatorSet
-import android.view.View
-import android.view.WindowInsets
-import android.view.WindowInsetsController
-import android.view.WindowManager
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
-import android.view.animation.AccelerateDecelerateInterpolator
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
@@ -54,7 +45,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var delayTextView: TextView
     private lateinit var fpsTextView: TextView
     private lateinit var letterTextView: TextView
-    private lateinit var statusTextView: TextView
     private lateinit var switchCameraButton: Button
     private lateinit var connectButton: Button
     private lateinit var disconnectButton: Button
@@ -86,22 +76,6 @@ class MainActivity : AppCompatActivity() {
 
 
     private val CAMERA_PERMISSION_REQUEST_CODE = 101
-    private val telegrafUrl = "http://glmuller.ddns.net:8088/ingest"
-    private val metricsQueue: BlockingQueue<MetricData> = LinkedBlockingQueue()
-    private val metricsExecutor: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
-    private var isMetricsSystemRunning = false
-    private var webSocketClient: WebSocketClient? = null
-    private val isConnected = AtomicBoolean(false)
-    
-    companion object {
-        private const val TAG = "MainActivity"
-    }
-
-    // Enhanced ASL letter display variables and functions
-    private var currentLetter: String = ""
-    private var letterDisplayTime: Long = 0
-    private var letterConfidenceCount: Int = 0
-    private val letterConfidenceThreshold = 3 // Show letter only after 3 consecutive detections
 
     // Async metrics system
     private val telegrafUrl = "http://glmuller.ddns.net:8088/ingest"
@@ -128,52 +102,683 @@ class MainActivity : AppCompatActivity() {
         
         setContentView(R.layout.activity_main)
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        
-        // Handle WindowInsets for edge-to-edge display
-        setupWindowInsets()
-        
         previewView = findViewById(R.id.previewView)
         previewView.scaleType = PreviewView.ScaleType.FILL_CENTER
         overlay = findViewById(R.id.overlay)
         delayTextView = findViewById(R.id.delayTextView)
         fpsTextView = findViewById(R.id.fpsTextView)
         letterTextView = findViewById(R.id.letterTextView)
-        statusTextView = findViewById(R.id.statusTextView)
         switchCameraButton = findViewById(R.id.switchCameraButton)
         connectButton = findViewById(R.id.connectButton)
         disconnectButton = findViewById(R.id.disconnectButton)
         connectivityManager = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
-        
         // Make sure overlay is transparent and on top
         overlay.setZOrderOnTop(true)
         overlay.holder.setFormat(PixelFormat.TRANSPARENT)
-        
+
         switchCameraButton.setOnClickListener {
             lensFacing = if (lensFacing == CameraSelector.LENS_FACING_FRONT) {
                 CameraSelector.LENS_FACING_BACK
             } else {
                 CameraSelector.LENS_FACING_FRONT
             }
-            startCamera()
+            bindCameraUseCases()
         }
-        
+
         connectButton.setOnClickListener {
-            connectToServer()
+            Log.i(TAG, "Connect button pressed")
+            connectSocket()
+        }
+        disconnectButton.setOnClickListener { disconnectSocket(true) }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            networkCallback = object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) {
+                    isNetworkAvailable = true
+                    if (!isSocketConnected) {
+                        connectSocket()
+                    }
+                }
+
+                override fun onLost(network: Network) {
+                    isNetworkAvailable = false
+                    disconnectSocket()
+                    runOnUiThread {
+                        Toast.makeText(this@MainActivity, "Network connection lost", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+            networkCallback?.let { connectivityManager.registerDefaultNetworkCallback(it) }
+            isNetworkAvailable = connectivityManager.activeNetwork != null
+        }
+
+        if (isCameraPermissionGranted()) {
+            initCamera()
+        } else {
+            requestCameraPermission()
         }
         
-        disconnectButton.setOnClickListener {
-            webSocketClient?.close()
-            webSocketClient = null
-            isConnected.set(false)
-            runOnUiThread {
-                connectButton.visibility = View.VISIBLE
-                disconnectButton.visibility = View.GONE
-                letterTextView.text = ""
-                statusTextView.visibility = View.GONE
+        // Start async metrics system
+        startMetricsSystem()
+    }
+
+
+    private fun isCameraPermissionGranted(): Boolean {
+        return ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.CAMERA
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun requestCameraPermission() {
+        ActivityCompat.requestPermissions(
+            this,
+            arrayOf(Manifest.permission.CAMERA),
+            CAMERA_PERMISSION_REQUEST_CODE
+        )
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == CAMERA_PERMISSION_REQUEST_CODE) {
+            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                initCamera()
+            } else {
+                Toast.makeText(this, "Camera permission denied", Toast.LENGTH_LONG).show()
+                // You might want to disable camera functionality here or close the app
             }
         }
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        bindCameraUseCases()
+    }
+
+    private fun initCamera() {
+        val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
+        cameraProviderFuture.addListener({
+            cameraProvider = cameraProviderFuture.get()
+            bindCameraUseCases()
+        }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun bindCameraUseCases() {
+        val provider = cameraProvider ?: return
+
+        val rotation = previewView.display.rotation
+
+        val previewResolution = if (rotation == Surface.ROTATION_90 || rotation == Surface.ROTATION_270) {
+            Size(480, 640)
+        } else {
+            Size(640, 480)
+        }
+        this.target = previewResolution
+
+        val analysisResolution = if (rotation == Surface.ROTATION_90 || rotation == Surface.ROTATION_270) {
+            Size(240, 320)  // Force smaller resolution
+        } else {
+            Size(320, 240)  // Force smaller resolution
+        }
+
+        val preview = Preview.Builder()
+            .setTargetResolution(previewResolution)
+            .setTargetRotation(rotation)
+            .build().also {
+                it.setSurfaceProvider(previewView.surfaceProvider)
+            }
+
+        val imageAnalysis = ImageAnalysis.Builder()
+            .setTargetResolution(analysisResolution)
+            .setTargetRotation(rotation)
+            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+            .build()
+
+        imageAnalysis.setAnalyzer(ContextCompat.getMainExecutor(this)) { imageProxy ->
+            val currentTime = System.currentTimeMillis()
+            
+            // Limit frame rate to ~10 FPS (100ms between frames)
+            if (currentTime - lastProcessedTime < 100) {
+                Log.d(TAG, "Skipping frame - frame rate limit")
+                imageProxy.close()
+                return@setAnalyzer
+            }
+            
+            // Check if we're waiting for response with timeout
+            if (waitingForResponse.get()) {
+                if (currentTime - lastFrameSentTime < 1500) { // 1.5s timeout - more aggressive
+                    Log.d(TAG, "Skipping frame - waiting for response")
+                    imageProxy.close()
+                    return@setAnalyzer
+                } else {
+                    Log.w(TAG, "Response timeout, continuing with next frame")
+                    waitingForResponse.set(false)
+                }
+            }
+
+            lastProcessedTime = currentTime
+            val yuvData = imageProxyToYuvWithMetadata(imageProxy)
+            sendFrameToServer(yuvData)
+            imageProxy.close()
+        }
+
+        val selector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
+
+        provider.unbindAll()
+        provider.bindToLifecycle(this, selector, preview, imageAnalysis)
+    }
+
+    private fun imageProxyToYuvWithMetadata(image: ImageProxy): ByteArray {
+        Log.d(TAG, "Converting ImageProxy to YUV data - size: ${image.width}x${image.height}, format: ${image.format}")
+
+        val originalWidth = image.width
+        val originalHeight = image.height
         
-        checkPermissions()
+        // Force downsampling to 100x100 for ultra-fast processing
+        val targetSize = 100
+        val scale = minOf(targetSize.toFloat() / originalWidth, targetSize.toFloat() / originalHeight)
+        val width = (originalWidth * scale).toInt()
+        val height = (originalHeight * scale).toInt()
+        
+        Log.d(TAG, "Downsampling from ${originalWidth}x${originalHeight} to ${width}x${height} (scale: $scale)")
+        val rotation = image.imageInfo.rotationDegrees
+
+        // Y, U and V planes
+        val yPlane = image.planes[0]
+        val uPlane = image.planes[1]
+        val vPlane = image.planes[2]
+
+        val expectedSize = width * height * 3 / 2
+        val nv21 = ByteArray(expectedSize)
+        var offset = 0
+
+        // Log buffer characteristics for debugging
+        Log.d(TAG, "Y plane: stride=${yPlane.rowStride}, pixelStride=${yPlane.pixelStride}, buffer size=${yPlane.buffer.remaining()}")
+        Log.d(TAG, "U plane: stride=${uPlane.rowStride}, pixelStride=${uPlane.pixelStride}, buffer size=${uPlane.buffer.remaining()}")
+        Log.d(TAG, "V plane: stride=${vPlane.rowStride}, pixelStride=${vPlane.pixelStride}, buffer size=${vPlane.buffer.remaining()}")
+        
+        val yuvTime = measureTimeMillis {
+            // ----- Downsample Y plane -----
+            val yBuffer = yPlane.buffer
+            val yRowStride = yPlane.rowStride
+            val yPixelStride = yPlane.pixelStride
+            
+            val yTime = measureTimeMillis {
+                // Extract downsampled Y plane with bounds checking
+                for (row in 0 until height) {
+                    val srcRow = (row / scale).toInt().coerceAtMost(originalHeight - 1) // Map to source row
+                    for (col in 0 until width) {
+                        val srcCol = (col / scale).toInt().coerceAtMost(originalWidth - 1) // Map to source col
+                        val srcPos = srcRow * yRowStride + srcCol * yPixelStride
+                        if (srcPos < yBuffer.limit()) {
+                            yBuffer.position(srcPos)
+                            nv21[offset++] = yBuffer.get()
+                        } else {
+                            // If position is out of bounds, use the last valid pixel
+                            yBuffer.position(yBuffer.limit() - 1)
+                            nv21[offset++] = yBuffer.get()
+                        }
+                    }
+                }
+            }
+            Log.d(TAG, "Y plane downsampling took $yTime ms")
+
+            // ----- Downsample UV planes -----
+            val uBuffer = uPlane.buffer
+            val vBuffer = vPlane.buffer
+            val uRowStride = uPlane.rowStride
+            val vRowStride = vPlane.rowStride
+            val uvPixelStride = uPlane.pixelStride
+            val uvHeight = height / 2
+            val uvWidth = width / 2
+
+            // Downsample UV planes and interleave (NV21 format: V,U,V,U...) with bounds checking
+            for (row in 0 until uvHeight) {
+                val srcRow = (row * 2 / scale).toInt().coerceAtMost(originalHeight / 2 - 1) // UV planes are half resolution
+                for (col in 0 until uvWidth) {
+                    val srcCol = (col * 2 / scale).toInt().coerceAtMost(originalWidth / 2 - 1)
+                    val srcUPos = srcRow * uRowStride + srcCol * uvPixelStride
+                    val srcVPos = srcRow * vRowStride + srcCol * uvPixelStride
+                    
+                    // Check bounds for UV buffers
+                    val safeVPos = if (srcVPos < vBuffer.limit()) srcVPos else vBuffer.limit() - 1
+                    val safeUPos = if (srcUPos < uBuffer.limit()) srcUPos else uBuffer.limit() - 1
+                    
+                    vBuffer.position(safeVPos)
+                    uBuffer.position(safeUPos)
+                    
+                    nv21[offset++] = vBuffer.get() // V first (NV21 format)
+                    nv21[offset++] = uBuffer.get() // then U
+                }
+            }
+        }
+        Log.d(TAG, "YUV extraction took $yuvTime ms")
+
+        // Ensure the array is the expected size
+        if (offset != expectedSize) {
+            Log.e(TAG, "NV21 array size mismatch: wrote $offset bytes, expected $expectedSize")
+            return ByteArray(0)
+        }
+
+        // Apply rotation if needed
+        var rotWidth = width
+        var rotHeight = height
+        var nv21Rotated = nv21
+        if (rotation != 0) {
+            val rotationTime = measureTimeMillis {
+                nv21Rotated = rotateNV21(nv21, width, height, rotation)
+            }
+            Log.d(TAG, "YUV rotation took $rotationTime ms")
+            if (rotation == 90 || rotation == 270) {
+                rotWidth = height
+                rotHeight = width
+            }
+        }
+        this.target = Size(rotWidth, rotHeight)
+
+        // Create metadata header (16 bytes)
+        val metadata = ByteBuffer.allocate(16)
+            .putInt(rotWidth)       // 4 bytes - width
+            .putInt(rotHeight)      // 4 bytes - height
+            .putInt(rotation)       // 4 bytes - rotation
+            .putInt(nv21Rotated.size)  // 4 bytes - YUV data size
+            .array()
+
+        // Combine metadata + YUV data
+        val finalData = ByteArray(metadata.size + nv21Rotated.size)
+        System.arraycopy(metadata, 0, finalData, 0, metadata.size)
+        System.arraycopy(nv21Rotated, 0, finalData, metadata.size, nv21Rotated.size)
+
+        Log.d(TAG, "YUV data prepared - final bytes: ${finalData.size} (${metadata.size} metadata + ${nv21Rotated.size} YUV)")
+        return finalData
+    }
+
+    private fun imageProxyToBitmap(image: ImageProxy): ByteArray {
+        Log.d(TAG, "Converting ImageProxy to JPEG - size: ${image.width}x${image.height}, format: ${image.format}")
+
+        val width = image.width
+        val height = image.height
+
+        // Y, U and V planes
+        val yPlane = image.planes[0]
+        val uPlane = image.planes[1]
+        val vPlane = image.planes[2]
+
+        val expectedSize = width * height * 3 / 2
+        val nv21 = ByteArray(expectedSize)
+        var offset = 0
+
+        val yuvTime = measureTimeMillis {
+            // ----- Copy Y plane row by row -----
+            val yBuffer = yPlane.buffer
+            val yRowStride = yPlane.rowStride
+            val yPixelStride = yPlane.pixelStride
+            if (yPixelStride == 1) {
+                for (row in 0 until height) {
+                    val yPos = row * yRowStride
+                    yBuffer.position(yPos)
+                    yBuffer.get(nv21, offset, width)
+                    offset += width
+                }
+            } else {
+                for (row in 0 until height) {
+                    var yPos = row * yRowStride
+                    for (col in 0 until width) {
+                        nv21[offset++] = yBuffer.get(yPos)
+                        yPos += yPixelStride
+                    }
+                }
+            }
+
+            // ----- Copy and interleave V and U planes (NV21) -----
+            val uBuffer = uPlane.buffer
+            val vBuffer = vPlane.buffer
+            val uRowStride = uPlane.rowStride
+            val vRowStride = vPlane.rowStride
+            val uvPixelStride = uPlane.pixelStride  // same as vPlane.pixelStride
+
+            if (uvPixelStride == 1) {
+                val rowSize = width / 2
+                val vRow = ByteArray(rowSize)
+                val uRow = ByteArray(rowSize)
+                for (row in 0 until height / 2) {
+                    vBuffer.position(row * vRowStride)
+                    vBuffer.get(vRow, 0, rowSize)
+                    uBuffer.position(row * uRowStride)
+                    uBuffer.get(uRow, 0, rowSize)
+                    var col = 0
+                    while (col < rowSize) {
+                        nv21[offset++] = vRow[col]
+                        nv21[offset++] = uRow[col]
+                        col++
+                    }
+                }
+            } else {
+                for (row in 0 until height / 2) {
+                    var uPos = row * uRowStride
+                    var vPos = row * vRowStride
+                    for (col in 0 until width / 2) {
+                        nv21[offset++] = vBuffer.get(vPos)
+                        nv21[offset++] = uBuffer.get(uPos)
+                        vPos += uvPixelStride
+                        uPos += uvPixelStride
+                    }
+                }
+            }
+        }
+        Log.d(TAG, "faseYuv took $yuvTime ms")
+
+        // Ensure the array is the expected size before creating YuvImage
+        if (offset != expectedSize) {
+            Log.e(TAG, "NV21 array size mismatch: wrote $offset bytes, expected $expectedSize")
+            return ByteArray(0)
+        }
+
+        var rotWidth = width
+        var rotHeight = height
+        var nv21Rotated = nv21
+        val rotation = image.imageInfo.rotationDegrees
+        if (rotation != 0) {
+            val rotationTime = measureTimeMillis {
+                nv21Rotated = rotateNV21(nv21, width, height, rotation)
+            }
+            Log.d(TAG, "faseRotacion took $rotationTime ms")
+            if (rotation == 90 || rotation == 270) {
+                rotWidth = height
+                rotHeight = width
+            }
+        }
+        this.target = Size(rotWidth, rotHeight)
+
+        var imageBytes: ByteArray
+        val jpegTime = measureTimeMillis {
+            val yuvImage = YuvImage(nv21Rotated, ImageFormat.NV21, rotWidth, rotHeight, null)
+            jpegOutputStream.reset()
+            yuvImage.compressToJpeg(Rect(0, 0, rotWidth, rotHeight), 80, jpegOutputStream)
+            imageBytes = jpegOutputStream.toByteArray()
+        }
+        Log.d(TAG, "faseJpeg took $jpegTime ms")
+        Log.d(TAG, "JPEG conversion completed - final bytes: ${imageBytes.size}")
+        return imageBytes
+    }
+
+    private fun rotateNV21(src: ByteArray, width: Int, height: Int, rotation: Int): ByteArray {
+        if (rotation == 0) return src
+        val dst = ByteArray(src.size)
+        val frameSize = width * height
+        var destIdx = 0
+        when (rotation) {
+            90 -> {
+                for (x in 0 until width) {
+                    for (y in height - 1 downTo 0) {
+                        dst[destIdx++] = src[y * width + x]
+                    }
+                }
+                for (x in 0 until width step 2) {
+                    for (y in height / 2 - 1 downTo 0) {
+                        val index = frameSize + y * width + x
+                        dst[destIdx++] = src[index]
+                        dst[destIdx++] = src[index + 1]
+                    }
+                }
+            }
+            180 -> {
+                for (i in frameSize - 1 downTo 0) {
+                    dst[destIdx++] = src[i]
+                }
+                for (i in src.size - 2 downTo frameSize step 2) {
+                    dst[destIdx++] = src[i]
+                    dst[destIdx++] = src[i + 1]
+                }
+            }
+            270 -> {
+                for (x in width - 1 downTo 0) {
+                    for (y in 0 until height) {
+                        dst[destIdx++] = src[y * width + x]
+                    }
+                }
+                for (x in width - 2 downTo 0 step 2) {
+                    for (y in 0 until height / 2) {
+                        val index = frameSize + y * width + x
+                        dst[destIdx++] = src[index]
+                        dst[destIdx++] = src[index + 1]
+                    }
+                }
+            }
+            else -> {
+                System.arraycopy(src, 0, dst, 0, src.size)
+            }
+        }
+        return dst
+    }
+
+    private fun sendFrameToServer(frameBytes: ByteArray) {
+        if (!isSocketConnected) return
+        Log.d("MainActivity", "Sending frame to server - bytes: ${frameBytes.size}, socket connected: $isSocketConnected")
+
+        val currentTime = System.currentTimeMillis()
+        sendTimes.add(currentTime)
+        lastFrameSentTime = currentTime
+        socket?.send(frameBytes)
+        waitingForResponse.set(true)
+        Log.d("MainActivity", "Frame sent successfully via WebSocket")
+    }
+
+    private fun startMetricsSystem() {
+        if (isMetricsSystemRunning) return
+        
+        isMetricsSystemRunning = true
+        Log.i(TAG, "Starting async metrics system")
+        
+        // Schedule metrics processor to run every 1 second
+        metricsExecutor.scheduleAtFixedRate({
+            processMetricsQueue()
+        }, 1, 1, TimeUnit.SECONDS)
+    }
+    
+    private fun stopMetricsSystem() {
+        isMetricsSystemRunning = false
+        metricsExecutor.shutdown()
+        metricsQueue.clear()
+        Log.i(TAG, "Stopped async metrics system")
+    }
+    
+    private fun queueMetric(delay: Long, fps: Float) {
+        // Non-blocking queue operation - if queue is full, oldest items are dropped
+        val metric = MetricData(delay, fps)
+        
+        if (!metricsQueue.offer(metric)) {
+            // Queue is full, remove oldest and add new
+            metricsQueue.poll()
+            metricsQueue.offer(metric)
+            Log.w(TAG, "Metrics queue full, dropped oldest metric")
+        }
+    }
+    
+    private fun processMetricsQueue() {
+        if (metricsQueue.isEmpty()) {
+            return
+        }
+        
+        // Get the most recent metric (aggregate if multiple)
+        val metrics = mutableListOf<MetricData>()
+        metricsQueue.drainTo(metrics)
+        
+        if (metrics.isEmpty()) return
+        
+        // Use the most recent metric or calculate average
+        val latestMetric = if (metrics.size == 1) {
+            metrics[0]
+        } else {
+            // Calculate average if we have multiple metrics
+            val avgDelay = metrics.map { it.delay }.average().toLong()
+            val avgFps = metrics.map { it.fps }.average().toFloat()
+            MetricData(avgDelay, avgFps)
+        }
+        
+        Log.d(TAG, "Processing metrics batch: ${metrics.size} items, avg delay: ${latestMetric.delay}ms, avg fps: ${latestMetric.fps}")
+        
+        // Send to InfluxDB with no retries - fire and forget
+        sendMetricToInfluxDB(latestMetric)
+    }
+    
+    private fun sendMetricToInfluxDB(metric: MetricData) {
+        try {
+            val url = URL(telegrafUrl)
+            val connection = url.openConnection() as HttpURLConnection
+            
+            // Aggressive timeouts - fail fast
+            connection.connectTimeout = 2000 // 2 seconds
+            connection.readTimeout = 2000    // 2 seconds
+            
+            connection.requestMethod = "POST"
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.setRequestProperty("Accept", "application/json")
+            connection.doOutput = true
+            
+            val jsonData = JSONObject().apply {
+                put("measurement", "frontend")
+                put("ts", metric.timestamp)
+                put("fe", "frontend")
+                put("delay_ms", metric.delay)
+                put("fps", metric.fps)
+                put("session", "android_session")
+                put("device", Build.MODEL)
+                put("app_ver", "1.0")
+            }
+            
+            connection.outputStream.use { os ->
+                os.write(jsonData.toString().toByteArray())
+                os.flush()
+            }
+            
+            val responseCode = connection.responseCode
+            if (responseCode == HttpURLConnection.HTTP_OK) {
+                Log.d(TAG, "✓ Metrics sent: ${metric.delay}ms, ${metric.fps}fps")
+            } else {
+                Log.w(TAG, "✗ Metrics failed: HTTP $responseCode - dropping and continuing")
+            }
+            
+            connection.disconnect()
+            
+        } catch (e: Exception) {
+            // Fail silently and continue - no retries
+            Log.w(TAG, "✗ Metrics error: ${e.message} - dropping and continuing")
+        }
+    }
+
+    private fun connectSocket() {
+        if (isSocketConnected) {
+            Toast.makeText(this, "Socket already connected", Toast.LENGTH_SHORT).show()
+            Log.i(TAG, "Connection attempt aborted: already connected")
+            return
+        }
+        if (!isNetworkAvailable) {
+            Toast.makeText(this, "Network unavailable", Toast.LENGTH_SHORT).show()
+            Log.w(TAG, "Network unavailable; attempting connection anyway")
+        }
+        Log.i(TAG, "Starting connection attempt")
+        shouldReconnect = true
+        reconnectDelay = 1000
+        initWebSocket()
+    }
+
+    private fun disconnectSocket(userInitiated: Boolean = false) {
+        shouldReconnect = !userInitiated
+        waitingForResponse.set(false)
+        sendTimes.clear()
+        closeSocket()
+    }
+
+    private fun closeSocket() {
+        socket?.close()
+        socket = null
+        isSocketConnected = false
+    }
+
+    private fun initWebSocket() {
+        val uri = URI("ws://glmuller.ddns.net:5000/ws")
+        socket = object : WebSocketClient(uri) {
+            override fun onOpen(handshakedata: ServerHandshake?) {
+                isSocketConnected = true
+                reconnectDelay = 1000
+                Log.i(TAG, "WebSocket connected")
+                runOnUiThread {
+                    Toast.makeText(this@MainActivity, "Connected", Toast.LENGTH_SHORT).show()
+                }
+            }
+
+            override fun onMessage(message: String?) {
+                val sendTime = if (sendTimes.isNotEmpty()) sendTimes.removeFirst() else null
+                val now = System.currentTimeMillis()
+                val delay = sendTime?.let { now - it } ?: 0L
+                val fps = if (lastFrameTime != 0L) 1000f / (now - lastFrameTime) else 0f
+                lastFrameTime = now
+                runOnUiThread {
+                    Log.d("MainActivity", "WebSocket message received - delay: ${delay}ms, message length: ${message?.length ?: 0}")
+                    delayTextView.text = "${delay} ms"
+                    fpsTextView.text = String.format("%.1f fps", fps)
+                    if (message != null) {
+                        val json = JSONObject(message)
+                        letterTextView.text = json.optString("letter", "")
+                        drawOverlay(json)
+                    }
+                }
+                
+                // Queue metrics asynchronously (non-blocking)
+                queueMetric(delay, fps)
+                
+                waitingForResponse.set(false)
+            }
+
+            override fun onClose(code: Int, reason: String?, remote: Boolean) {
+                isSocketConnected = false
+                Log.w(TAG, "WebSocket closed: $reason")
+                runOnUiThread {
+                    Toast.makeText(this@MainActivity, "Connection closed", Toast.LENGTH_SHORT).show()
+                }
+                waitingForResponse.set(false)
+                sendTimes.clear()
+                if (shouldReconnect) {
+                    reconnectWithBackoff()
+                }
+            }
+
+            override fun onError(ex: Exception?) {
+                ex?.printStackTrace()
+                isSocketConnected = false
+                Log.e(TAG, "WebSocket error", ex)
+                runOnUiThread {
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Connection failed: ${ex?.message}",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+                waitingForResponse.set(false)
+                sendTimes.clear()
+                if (shouldReconnect) {
+                    reconnectWithBackoff()
+                }
+            }
+        }
+        socket?.connect()
+    }
+
+    private fun reconnectWithBackoff() {
+        if (!shouldReconnect || isSocketConnected || !isNetworkAvailable) return
+
+        Handler(Looper.getMainLooper()).postDelayed({
+            if (shouldReconnect && !isSocketConnected && isNetworkAvailable) {
+                initWebSocket()
+            }
+        }, reconnectDelay)
+
+        reconnectDelay = (reconnectDelay * 2).coerceAtMost(maxReconnectDelay)
     }
 
     /**
@@ -190,6 +795,7 @@ class MainActivity : AppCompatActivity() {
             }
         } else {
             // Android 10 and below - Legacy approach
+            @Suppress("DEPRECATION")
             window.decorView.systemUiVisibility = (
                 View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
                     or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
@@ -202,165 +808,13 @@ class MainActivity : AppCompatActivity() {
     }
     
     /**
-     * Handle WindowInsets to properly position UI elements
-     * Avoids overlap with status bar, notch, or navigation buttons
-     */
-    private fun setupWindowInsets() {
-        val rootContainer = findViewById<View>(R.id.rootContainer)
-        val uiContainer = findViewById<View>(R.id.uiContainer)
-        
-        ViewCompat.setOnApplyWindowInsetsListener(rootContainer) { view, insets ->
-            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            val displayCutout = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
-            
-            // Apply safe area insets to UI container
-            uiContainer.setPadding(
-                maxOf(systemBars.left, displayCutout.left),
-                maxOf(systemBars.top, displayCutout.top),
-                maxOf(systemBars.right, displayCutout.right),
-                maxOf(systemBars.bottom, displayCutout.bottom)
-            )
-            
-            Log.d("WindowInsets", "Applied insets - Top: ${maxOf(systemBars.top, displayCutout.top)}, " +
-                    "Bottom: ${maxOf(systemBars.bottom, displayCutout.bottom)}")
-            
-            insets
-        }
-    }
-    
-    /**
      * Re-enter immersive mode when user interacts with system bars
      */
-    private fun enterImmersiveMode() {
-        setupImmersiveMode()
-    }
-    
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) {
-            enterImmersiveMode()
+            setupImmersiveMode()
         }
-    }
-
-    // ===== CAMERA METHODS =====
-    
-    private fun checkPermissions() {
-        if (isCameraPermissionGranted()) {
-            initCamera()
-        } else {
-            requestCameraPermission()
-        }
-        
-        // Start async metrics system
-        startMetricsSystem()
-    }
-    
-    private fun isCameraPermissionGranted() = ContextCompat.checkSelfPermission(
-        this, Manifest.permission.CAMERA
-    ) == PackageManager.PERMISSION_GRANTED
-    
-    private fun requestCameraPermission() {
-        ActivityCompat.requestPermissions(
-            this, arrayOf(Manifest.permission.CAMERA), CAMERA_PERMISSION_REQUEST_CODE
-        )
-    }
-    
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<String>,
-        grantResults: IntArray
-    ) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == CAMERA_PERMISSION_REQUEST_CODE) {
-            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                initCamera()
-            } else {
-                Toast.makeText(this, "Camera permission denied", Toast.LENGTH_LONG).show()
-            }
-        }
-    }
-    
-    override fun onConfigurationChanged(newConfig: Configuration) {
-        super.onConfigurationChanged(newConfig)
-        bindCameraUseCases()
-    }
-    
-    private fun initCamera() {
-        val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
-        cameraProviderFuture.addListener({
-            cameraProvider = cameraProviderFuture.get()
-            bindCameraUseCases()
-        }, ContextCompat.getMainExecutor(this))
-    }
-    
-    private fun bindCameraUseCases() {
-        val provider = cameraProvider ?: return
-        
-        val rotation = previewView.display.rotation
-        
-        val previewResolution = if (rotation == Surface.ROTATION_90 || rotation == Surface.ROTATION_270) {
-            Size(480, 640)
-        } else {
-            Size(640, 480)
-        }
-        this.target = previewResolution
-        
-        val analysisResolution = if (rotation == Surface.ROTATION_90 || rotation == Surface.ROTATION_270) {
-            Size(240, 320)  // Force smaller resolution
-        } else {
-            Size(320, 240)  // Force smaller resolution
-        }
-        
-        val preview = Preview.Builder()
-            .setTargetResolution(previewResolution)
-            .setTargetRotation(rotation)
-            .build().also {
-                it.setSurfaceProvider(previewView.surfaceProvider)
-            }
-        
-        val imageAnalysis = ImageAnalysis.Builder()
-            .setTargetResolution(analysisResolution)
-            .setTargetRotation(rotation)
-            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-            .build()
-        
-        imageAnalysis.setAnalyzer(ContextCompat.getMainExecutor(this)) { imageProxy ->
-            val currentTime = System.currentTimeMillis()
-            
-            // Limit frame rate to ~10 FPS (100ms between frames)
-            if (currentTime - lastProcessedTime < 100) {
-                Log.d(TAG, "Skipping frame - frame rate limit")
-                imageProxy.close()
-                return@setAnalyzer
-            }
-            
-            // Check if we are waiting for response with timeout
-            if (waitingForResponse.get()) {
-                if (currentTime - lastFrameSentTime < 1500) { // 1.5s timeout - more aggressive
-                    Log.d(TAG, "Skipping frame - waiting for response")
-                    imageProxy.close()
-                    return@setAnalyzer
-                } else {
-                    Log.w(TAG, "Response timeout, continuing with next frame")
-                    waitingForResponse.set(false)
-                }
-            }
-            
-            lastProcessedTime = currentTime
-            val yuvData = imageProxyToYuvWithMetadata(imageProxy)
-            sendFrameToServer(yuvData)
-            imageProxy.close()
-        }
-        
-        val selector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
-        
-        provider.unbindAll()
-        provider.bindToLifecycle(this, selector, preview, imageAnalysis)
-    }
-    
-    // Fix: Add alias for backward compatibility
-    private fun startCamera() {
-        bindCameraUseCases()
     }
 
     override fun onDestroy() {
@@ -495,130 +949,5 @@ class MainActivity : AppCompatActivity() {
         }
 
         canvas?.let { overlay.holder.unlockCanvasAndPost(it) }
-    }
-    // Enhanced ASL letter display with visual effects
-    private fun updateASLLetterDisplay(json: JSONObject) {
-        val newLetter = json.optString("letter", "")
-        val currentTime = System.currentTimeMillis()
-        
-        // Extract debug info if available
-        val debugInfo = json.optJSONObject("debug_info")
-        var qualityScore = 0.0f
-        var isChallengingBackground = false
-        var needsEnhancement = false
-        
-        debugInfo?.let { debug ->
-            qualityScore = debug.optDouble("quality_score", 0.0).toFloat()
-            isChallengingBackground = debug.optBoolean("is_challenging", false)
-            needsEnhancement = debug.optBoolean("needs_enhancement", false)
-        }
-        
-        // Update status information
-        updateStatusDisplay(qualityScore, isChallengingBackground, needsEnhancement)
-        
-        when {
-            newLetter.isEmpty() -> {
-                // No letter detected - reset confidence and clear display gradually
-                letterConfidenceCount = 0
-                if (currentTime - letterDisplayTime > 2000) { // 2 seconds timeout
-                    fadeOutLetter()
-                }
-            }
-            
-            newLetter == currentLetter -> {
-                // Same letter detected - increase confidence
-                letterConfidenceCount++
-                if (letterConfidenceCount >= letterConfidenceThreshold) {
-                    // High confidence - update display with animation
-                    displayLetterWithAnimation(newLetter, qualityScore)
-                }
-            }
-            
-            else -> {
-                // New letter detected - reset confidence
-                currentLetter = newLetter
-                letterConfidenceCount = 1
-                letterDisplayTime = currentTime
-            }
-        }
-    }
-    
-    private fun displayLetterWithAnimation(letter: String, confidence: Float) {
-        runOnUiThread {
-            // Update text
-            letterTextView.text = letter
-            
-            // Choose color based on confidence/quality
-            val textColor = when {
-                confidence > 0.8f -> ContextCompat.getColor(this, R.color.letter_text_color) // High confidence - bright white
-                confidence > 0.5f -> ContextCompat.getColor(this, R.color.accent_primary) // Medium - green
-                else -> ContextCompat.getColor(this, R.color.status_text_color) // Low - gold
-            }
-            
-            letterTextView.setTextColor(textColor)
-            
-            // Scale animation for new letter
-            if (letterConfidenceCount == letterConfidenceThreshold) {
-                val scaleX = ObjectAnimator.ofFloat(letterTextView, "scaleX", 0.8f, 1.2f, 1.0f)
-                val scaleY = ObjectAnimator.ofFloat(letterTextView, "scaleY", 0.8f, 1.2f, 1.0f)
-                val alpha = ObjectAnimator.ofFloat(letterTextView, "alpha", 0.6f, 1.0f)
-                
-                val animatorSet = AnimatorSet()
-                animatorSet.playTogether(scaleX, scaleY, alpha)
-                animatorSet.duration = 300
-                animatorSet.interpolator = AccelerateDecelerateInterpolator()
-                animatorSet.start()
-            }
-            
-            // Update visibility
-            letterTextView.visibility = View.VISIBLE
-        }
-    }
-    
-    private fun fadeOutLetter() {
-        runOnUiThread {
-            val fadeOut = ObjectAnimator.ofFloat(letterTextView, "alpha", 1.0f, 0.3f)
-            fadeOut.duration = 500
-            fadeOut.start()
-            
-            // Clear text after animation
-            Handler(Looper.getMainLooper()).postDelayed({
-                letterTextView.text = ""
-                letterTextView.alpha = 1.0f
-                currentLetter = ""
-            }, 500)
-        }
-    }
-    
-    private fun updateStatusDisplay(qualityScore: Float, isChallengingBackground: Boolean, needsEnhancement: Boolean) {
-        runOnUiThread {
-            val statusText = when {
-                qualityScore > 0.8f -> "Excellent Detection"
-                qualityScore > 0.5f -> "Good Detection"
-                qualityScore > 0.0f -> "Poor Detection"
-                needsEnhancement -> "Processing..."
-                isChallengingBackground -> "Complex Background"
-                else -> ""
-            }
-            
-            if (statusText.isNotEmpty()) {
-                statusTextView.text = statusText
-                statusTextView.visibility = View.VISIBLE
-                
-                val statusColor = when {
-                    qualityScore > 0.7f -> ContextCompat.getColor(this, R.color.good_detection_color)
-                    qualityScore > 0.4f -> ContextCompat.getColor(this, R.color.status_text_color)
-                    else -> ContextCompat.getColor(this, R.color.poor_detection_color)
-                }
-                statusTextView.setTextColor(statusColor)
-                
-                // Auto-hide status after 3 seconds
-                Handler(Looper.getMainLooper()).postDelayed({
-                    statusTextView.visibility = View.GONE
-                }, 3000)
-            } else {
-                statusTextView.visibility = View.GONE
-            }
-        }
     }
 }
