@@ -20,6 +20,11 @@
     <color name="good_detection_color">#4CAF50</color>        <!-- Green for good detection -->
     <color name="poor_detection_color">#FF5722</color>        <!-- Orange-red for poor detection -->
     
+    <!-- Debug/Performance Indicator Colors -->
+    <color name="debug_text_color">#B0BEC5</color>            <!-- Subtle blue-gray for debug text -->
+    <color name="debug_background">#40263238</color>          <!-- Very subtle dark background -->
+    <color name="debug_divider_color">#60FFFFFF</color>       <!-- Subtle white divider -->
+    
     <!-- Button Colors -->
     <color name="connect_button_color">#4CAF50</color>        <!-- Green for connect -->
     <color name="disconnect_button_color">#F44336</color>     <!-- Red for disconnect -->
