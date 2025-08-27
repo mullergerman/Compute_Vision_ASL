@@ -15,13 +15,13 @@ from flask import Flask
 from flask_sock import Sock
 import mediapipe as mp
 import pickle
-from hand_detection_contrast_enhanced import ContrastEnhancedHandDetector
+from hand_detection_lightweight import LightweightHandDetectionOptimizer
 
 app = Flask(__name__)
 sock = Sock(app)
 
-# Inicializar el detector súper avanzado
-hand_detector = ContrastEnhancedHandDetector()
+# Inicializar el optimizador ligero
+hand_detector = LightweightHandDetectionOptimizer()
 
 # MediaPipe setup (mantener para compatibilidad)
 mp_hands = mp.solutions.hands
@@ -33,23 +33,6 @@ DEFAULT_TOPOLOGY = [
     )
     for c in mp_hands.HAND_CONNECTIONS
 ]
-
-# Helper function to convert numpy types to Python types
-def convert_numpy_types(obj):
-    """Convert numpy types to native Python types for JSON serialization"""
-    if isinstance(obj, np.integer):
-        return int(obj)
-    elif isinstance(obj, np.floating):
-        return float(obj)
-    elif isinstance(obj, np.bool_):
-        return bool(obj)
-    elif isinstance(obj, np.ndarray):
-        return obj.tolist()
-    elif isinstance(obj, dict):
-        return {key: convert_numpy_types(value) for key, value in obj.items()}
-    elif isinstance(obj, list):
-        return [convert_numpy_types(item) for item in obj]
-    return obj
 
 # Simple metrics function
 def send_metrics(measurement, tags=None, fields=None):
@@ -63,11 +46,11 @@ def send_metrics(measurement, tags=None, fields=None):
             'ts': int(time.time() * 1000)  # timestamp in milliseconds
         }
         
-        # Add tags and fields, converting numpy types
+        # Add tags and fields
         if tags:
-            data.update(convert_numpy_types(tags))
+            data.update(tags)
         if fields:
-            data.update(convert_numpy_types(fields))
+            data.update(fields)
         
         # Send to Telegraf HTTP endpoint
         req = urllib.request.Request(
@@ -161,13 +144,10 @@ def yuv_to_rgb(yuv_data, width, height):
 def process_video(ws):
     frame_count = 0
     last_processed_time = 0
-    processing_interval = 0.08  # Procesar máximo 12.5 FPS
+    processing_interval = 0.08  # Procesar máximo 12.5 FPS (más rápido que antes)
     
     # Variables para estadísticas de rendimiento
     detection_times = []
-    contrast_enhancement_count = 0
-    successful_detections = 0
-    skin_similarity_scores = []
     last_stats_time = time.time()
     
     while True:
@@ -178,7 +158,7 @@ def process_video(ws):
         frame_count += 1
         current_time = time.time()
         
-        # Drop frames para mantener velocidad
+        # Drop frames más agresivamente para mantener velocidad
         if (current_time - last_processed_time) < processing_interval:
             # Envío respuesta mínima para mantener conexión
             try:
@@ -202,7 +182,7 @@ def process_video(ws):
 
             # Procesar datos de imagen
             image_rgb = None
-            width, height = 640, 480  # Valores por defecto
+            width = height = 640, 480  # Valores por defecto
             
             # Try to parse as YUV data first
             yuv_result = parse_yuv_data(data)
@@ -228,26 +208,16 @@ def process_video(ws):
                 image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 width, height = frame.shape[1], frame.shape[0]
             
-            # 🎯 DETECCIÓN ULTIMATE CON REALCE DE CONTRASTE
+            # 🚀 DETECCIÓN SÚPER OPTIMIZADA
             start_detection = time.perf_counter()
-            results, detection_metadata = hand_detector.detect_hands_with_contrast_enhancement(image_rgb)
+            results, detection_metadata = hand_detector.detect_hands_optimized(image_rgb)
             end_detection = time.perf_counter()
             total_detection_time = (end_detection - start_detection) * 1000
             
-            # Guardar estadísticas para análisis
+            # Guardar estadística para análisis
             detection_times.append(total_detection_time)
             if len(detection_times) > 50:  # Mantener solo últimas 50 mediciones
                 detection_times.pop(0)
-            
-            # Recopilar estadísticas específicas del detector avanzado
-            skin_similarity = detection_metadata.get("skin_similarity", {})
-            skin_similarity_scores.append(skin_similarity.get("skin_percentage_combined", 0))
-            
-            if detection_metadata.get("needs_enhancement", False):
-                contrast_enhancement_count += 1
-                
-            if detection_metadata.get("hands_detected", 0) > 0:
-                successful_detections += 1
 
             keypoints = []
             topology = []
@@ -256,7 +226,7 @@ def process_video(ws):
 
             if results.multi_hand_landmarks:
                 for idx, hand_landmarks in enumerate(results.multi_hand_landmarks):
-                    # Validación del detector súper avanzado
+                    # Validación súper rápida
                     if hand_detector.simple_landmark_validation(hand_landmarks, width, height):
                         base = idx * len(hand_landmarks.landmark)
                         
@@ -276,74 +246,51 @@ def process_video(ws):
                         end_asl = time.perf_counter()
                         duration_asl_ms = (end_asl - start_asl) * 1000
 
-            # Enviar métricas súper detalladas (menos frecuentemente)
-            if frame_count % 20 == 0:  # Solo cada 20 frames
-                avg_detection_time = float(np.mean(detection_times[-10:])) if detection_times else 0.0
-                avg_skin_similarity = float(np.mean(skin_similarity_scores[-10:])) if skin_similarity_scores else 0.0
-                
+            # Enviar métricas simplificadas (menos frecuentemente)
+            if frame_count % 10 == 0:  # Solo cada 10 frames
+                avg_detection_time = np.mean(detection_times[-10:]) if detection_times else 0
                 send_metrics(
-                    measurement="asl_processing_ultimate",
+                    measurement="asl_processing_fast",
                     tags={
                         "endpoint": "ws", 
-                        "service": "asl-backend-ultimate"
+                        "service": "asl-backend-fast"
                     },
                     fields={
                         "avg_detection_time_ms": avg_detection_time,
-                        "hands_detected": int(detection_metadata.get("hands_detected", 0)),
-                        "frame_count": int(frame_count),
-                        "enhancement_time_ms": float(detection_metadata.get("enhancement_time_ms", 0)),
-                        "analysis_time_ms": float(detection_metadata.get("analysis_time_ms", 0)),
-                        "skin_similarity_avg": avg_skin_similarity,
-                        "needs_enhancement": bool(detection_metadata.get("needs_enhancement", False)),
-                        "consecutive_failures": int(detection_metadata.get("consecutive_failures", 0)),
-                        "adaptive_gamma": float(detection_metadata.get("adaptive_gamma", 1.0)),
-                        "adaptive_contrast": float(detection_metadata.get("adaptive_contrast", 1.0)),
-                        "is_challenging_background": bool(skin_similarity.get("is_challenging_background", False)),
-                        "color_uniformity": float(skin_similarity.get("color_uniformity_rgb", 0))
+                        "hands_detected": detection_metadata.get("hands_detected", 0),
+                        "frame_count": frame_count,
+                        "needs_enhancement": detection_metadata.get("needs_enhancement", False),
+                        "used_roi": detection_metadata.get("used_roi", False),
+                        "consecutive_failures": detection_metadata.get("consecutive_failures", 0)
                     }
                 )
 
-            # Respuesta optimizada
+            # Respuesta optimizada (campos mínimos necesarios)
             response = {
                 "keypoints": keypoints,
                 "topology": topology,
-                "image_width": int(width),
-                "image_height": int(height),
-                "letter": str(letter)
+                "image_width": width,
+                "image_height": height,
+                "letter": letter
             }
             
-            # Debug info súper detallado cada 30 frames
+            # Solo agregar debug info si es necesario (para debugging)
             if frame_count % 30 == 0:  # Solo cada 30 frames
                 response["debug_info"] = {
                     "detection_time": f"{total_detection_time:.1f}ms",
-                    "enhancement_time": f"{detection_metadata.get('enhancement_time_ms', 0):.1f}ms",
-                    "analysis_time": f"{detection_metadata.get('analysis_time_ms', 0):.1f}ms",
-                    "hands_detected": int(detection_metadata.get("hands_detected", 0)),
-                    "skin_similarity": float(skin_similarity.get("skin_percentage_combined", 0)),
-                    "is_challenging": bool(skin_similarity.get("is_challenging_background", False)),
-                    "color_uniformity": float(skin_similarity.get("color_uniformity_rgb", 0)),
-                    "needs_enhancement": bool(detection_metadata.get("needs_enhancement", False)),
-                    "consecutive_failures": int(detection_metadata.get("consecutive_failures", 0)),
-                    "adaptive_gamma": float(detection_metadata.get("adaptive_gamma", 1.0)),
-                    "adaptive_contrast": float(detection_metadata.get("adaptive_contrast", 1.0))
+                    "needs_enhancement": detection_metadata.get("needs_enhancement", False),
+                    "used_roi": detection_metadata.get("used_roi", False),
+                    "consecutive_failures": detection_metadata.get("consecutive_failures", 0)
                 }
             
             ws.send(json.dumps(response))
 
-            # Mostrar estadísticas súper detalladas cada 30 segundos
+            # Mostrar estadísticas cada 30 segundos
             if current_time - last_stats_time > 30:
                 if detection_times:
                     avg_time = np.mean(detection_times)
-                    hands_detected = detection_metadata.get('hands_detected', 0)
-                    enhancement_rate = (contrast_enhancement_count / frame_count) * 100 if frame_count > 0 else 0
-                    success_rate = (successful_detections / frame_count) * 100 if frame_count > 0 else 0
-                    avg_skin_sim = np.mean(skin_similarity_scores[-50:]) if skin_similarity_scores else 0
-                    
-                    print(f"🎯 ULTIMATE Stats - Frames: {frame_count}")
-                    print(f"   ⏱️  Avg time: {avg_time:.1f}ms, Hands: {hands_detected}")
-                    print(f"   🎨 Enhancement rate: {enhancement_rate:.1f}%, Success: {success_rate:.1f}%") 
-                    print(f"   🔍 Skin similarity: {avg_skin_sim:.1f}%, Adaptive γ: {detection_metadata.get('adaptive_gamma', 1.0):.2f}")
-                    
+                    print(f"📊 Stats - Frames: {frame_count}, Avg detection: {avg_time:.1f}ms, "
+                          f"Last hands: {detection_metadata.get('hands_detected', 0)}")
                 last_stats_time = current_time
 
         except Exception as e:
@@ -352,12 +299,6 @@ def process_video(ws):
             continue
 
 if __name__ == "__main__":
-    print("🎯 Starting ULTIMATE Hand Detection Server")
-    print("🚀 Specialized for challenging backgrounds with similar skin colors")
-    print("🔬 Features:")
-    print("   • Multi-spectrum skin analysis (HSV + LAB + YUV)")
-    print("   • Adaptive contrast enhancement")
-    print("   • Spectral hand filtering")
-    print("   • Dynamic parameter adjustment")
-    print("   • Advanced quality scoring")
+    print("🚀 Starting FAST Hand Detection Server")
+    print("Optimized for speed and efficiency in complex backgrounds")
     app.run(host="0.0.0.0", port=5000, debug=True)

@@ -1,0 +1,7 @@
+# Dependencias para las optimizaciones de detección de manos
+opencv-python>=4.8.0
+mediapipe>=0.10.0
+numpy>=1.21.0
+flask
+flask-sock
+python-dotenv
