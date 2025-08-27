@@ -1,6 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
+    <!-- Base theme -->
     <style name="Theme.ComputeVisionRemote" parent="android:Theme.Material.Light.NoActionBar" />
+
+    <!-- Immersive theme for full-screen camera experience -->
+    <style name="Theme.ComputeVisionRemote.NoActionBar.Immersive" parent="Theme.ComputeVisionRemote">
+        <!-- Remove title bar and navigation for immersive experience -->
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowFullscreen">false</item>
+        
+        <!-- Modern immersive settings for API 21+ -->
+        <item name="android:windowTranslucentStatus">false</item>
+        <item name="android:windowTranslucentNavigation">false</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+        
+        <!-- Status bar configuration -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        
+        <!-- Navigation bar configuration -->
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        
+        <!-- Layout configuration for edge-to-edge -->
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+        <item name="android:fitsSystemWindows">false</item>
+    </style>
 
 </resources>
