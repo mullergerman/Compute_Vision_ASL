@@ -108,7 +108,19 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        
+        // Configure window to prevent fullscreen mode and maintain system bars
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        
+        // Ensure we stay in normal windowed mode (not fullscreen)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // Android 11+ approach
+            window.setDecorFitsSystemWindows(true)
+        } else {
+            // Legacy approach - ensure system UI is visible
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_VISIBLE
+        }
         previewView = findViewById(R.id.previewView)
         previewView.scaleType = PreviewView.ScaleType.FILL_CENTER
         overlay = findViewById(R.id.overlay)
