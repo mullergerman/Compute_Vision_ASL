@@ -1,8 +1,3 @@
-import android.animation.ObjectAnimator
-import android.animation.AnimatorSet
-import android.view.View
-import android.view.animation.AccelerateDecelerateInterpolator
-import androidx.core.content.ContextCompat
 package com.example.computevisionremote
 
 import android.Manifest
@@ -33,6 +28,10 @@ import java.util.ArrayDeque
 import androidx.appcompat.app.AppCompatActivity
 import org.json.JSONArray
 import java.util.concurrent.atomic.AtomicBoolean
+import android.animation.ObjectAnimator
+import android.animation.AnimatorSet
+import android.view.View
+import android.view.animation.AccelerateDecelerateInterpolator
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
